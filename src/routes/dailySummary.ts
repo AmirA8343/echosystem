@@ -5,7 +5,7 @@ import { sanitizeDailySummaryPatch } from "../lib/mergeDailySummary.js";
 
 const summaryBodySchema = z.object({
   ecosystemUserId: z.string().uuid(),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  date: z.string().min(10).max(10),
   source: z.enum(["fitmacro", "fitface"]),
   summary: z.object({
     caloriesLogged: z.number().int().optional(),
@@ -18,12 +18,18 @@ const summaryBodySchema = z.object({
     sodiumMg: z.number().int().optional(),
     faceScanDone: z.boolean().optional(),
     bodyScanDone: z.boolean().optional(),
+    faceOverallScore: z.number().int().optional(),
+    bodyPostureScore: z.number().int().optional(),
+    bodyDefinitionScore: z.number().int().optional(),
+    bodyFatRangeEstimate: z.string().optional(),
+    nutritionSignalLabel: z.string().optional(),
+    nutritionSuggestion: z.string().optional(),
   }),
 });
 
 const summaryQuerySchema = z.object({
   ecosystemUserId: z.string().uuid(),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  date: z.string().min(10).max(10),
 });
 
 function toIsoDate(value: unknown): string {
@@ -37,6 +43,29 @@ function toIsoDate(value: unknown): string {
   }
 
   return String(value).slice(0, 10);
+}
+
+function mapDailySummary(row: Record<string, unknown>) {
+  return {
+    ecosystemUserId: row.ecosystem_user_id,
+    date: toIsoDate(row.date),
+    caloriesLogged: row.calories_logged,
+    proteinLogged: Number(row.protein_logged ?? 0) || null,
+    mealsLogged: row.meals_logged,
+    workoutMinutes: row.workout_minutes,
+    steps: row.steps,
+    sleepHours: Number(row.sleep_hours ?? 0) || null,
+    hydrationMl: row.hydration_ml,
+    sodiumMg: row.sodium_mg,
+    faceScanDone: row.face_scan_done,
+    bodyScanDone: row.body_scan_done,
+    faceOverallScore: row.face_overall_score,
+    bodyPostureScore: row.body_posture_score,
+    bodyDefinitionScore: row.body_definition_score,
+    bodyFatRangeEstimate: row.body_fat_range_estimate,
+    nutritionSignalLabel: row.nutrition_signal_label,
+    nutritionSuggestion: row.nutrition_suggestion,
+  };
 }
 
 export async function registerDailySummaryRoutes(app: FastifyInstance) {
@@ -61,17 +90,25 @@ export async function registerDailySummaryRoutes(app: FastifyInstance) {
       sodiumMg: patch.sodiumMg ?? current.rows[0]?.sodium_mg ?? null,
       faceScanDone: patch.faceScanDone ?? current.rows[0]?.face_scan_done ?? null,
       bodyScanDone: patch.bodyScanDone ?? current.rows[0]?.body_scan_done ?? null,
+      faceOverallScore: patch.faceOverallScore ?? current.rows[0]?.face_overall_score ?? null,
+      bodyPostureScore: patch.bodyPostureScore ?? current.rows[0]?.body_posture_score ?? null,
+      bodyDefinitionScore: patch.bodyDefinitionScore ?? current.rows[0]?.body_definition_score ?? null,
+      bodyFatRangeEstimate: patch.bodyFatRangeEstimate ?? current.rows[0]?.body_fat_range_estimate ?? null,
+      nutritionSignalLabel: patch.nutritionSignalLabel ?? current.rows[0]?.nutrition_signal_label ?? null,
+      nutritionSuggestion: patch.nutritionSuggestion ?? current.rows[0]?.nutrition_suggestion ?? null,
     };
 
     const result = await pool.query(
       `insert into ecosystem_daily_summaries (
          ecosystem_user_id, date, calories_logged, protein_logged, meals_logged,
          workout_minutes, steps, sleep_hours, hydration_ml, sodium_mg, face_scan_done, body_scan_done,
-         ${timestampColumn}
+         face_overall_score, body_posture_score, body_definition_score, body_fat_range_estimate,
+         nutrition_signal_label, nutrition_suggestion, ${timestampColumn}
        ) values (
          $1, $2, $3, $4, $5,
          $6, $7, $8, $9, $10, $11, $12,
-         now()
+         $13, $14, $15, $16,
+         $17, $18, now()
        )
        on conflict (ecosystem_user_id, date) do update set
          calories_logged = excluded.calories_logged,
@@ -84,6 +121,12 @@ export async function registerDailySummaryRoutes(app: FastifyInstance) {
          sodium_mg = excluded.sodium_mg,
          face_scan_done = excluded.face_scan_done,
          body_scan_done = excluded.body_scan_done,
+         face_overall_score = excluded.face_overall_score,
+         body_posture_score = excluded.body_posture_score,
+         body_definition_score = excluded.body_definition_score,
+         body_fat_range_estimate = excluded.body_fat_range_estimate,
+         nutrition_signal_label = excluded.nutrition_signal_label,
+         nutrition_suggestion = excluded.nutrition_suggestion,
          ${timestampColumn} = now(),
          updated_at = now()
        returning *`,
@@ -100,26 +143,19 @@ export async function registerDailySummaryRoutes(app: FastifyInstance) {
         merged.sodiumMg,
         merged.faceScanDone,
         merged.bodyScanDone,
+        merged.faceOverallScore,
+        merged.bodyPostureScore,
+        merged.bodyDefinitionScore,
+        merged.bodyFatRangeEstimate,
+        merged.nutritionSignalLabel,
+        merged.nutritionSuggestion,
       ]
     );
 
-    const row = result.rows[0];
+    const row = result.rows[0] as Record<string, unknown>;
     return {
       ok: true,
-      dailySummary: {
-        ecosystemUserId: row.ecosystem_user_id,
-        date: toIsoDate(row.date),
-        caloriesLogged: row.calories_logged,
-        proteinLogged: Number(row.protein_logged ?? 0) || null,
-        mealsLogged: row.meals_logged,
-        workoutMinutes: row.workout_minutes,
-        steps: row.steps,
-        sleepHours: Number(row.sleep_hours ?? 0) || null,
-        hydrationMl: row.hydration_ml,
-        sodiumMg: row.sodium_mg,
-        faceScanDone: row.face_scan_done,
-        bodyScanDone: row.body_scan_done,
-      },
+      dailySummary: mapDailySummary(row),
     };
   });
 
@@ -134,20 +170,7 @@ export async function registerDailySummaryRoutes(app: FastifyInstance) {
     if (!row) return reply.code(404).send({ error: "Daily summary not found." });
 
     return {
-      dailySummary: {
-        ecosystemUserId: row.ecosystem_user_id,
-        date: toIsoDate(row.date),
-        caloriesLogged: row.calories_logged,
-        proteinLogged: Number(row.protein_logged ?? 0) || null,
-        mealsLogged: row.meals_logged,
-        workoutMinutes: row.workout_minutes,
-        steps: row.steps,
-        sleepHours: Number(row.sleep_hours ?? 0) || null,
-        hydrationMl: row.hydration_ml,
-        sodiumMg: row.sodium_mg,
-        faceScanDone: row.face_scan_done,
-        bodyScanDone: row.body_scan_done,
-      },
+      dailySummary: mapDailySummary(row as Record<string, unknown>),
     };
   });
 }

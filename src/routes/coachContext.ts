@@ -37,6 +37,12 @@ function mapSummaryRow(row: Record<string, unknown>): EcosystemDailySummary {
     sodiumMg: row.sodium_mg as number | null,
     faceScanDone: row.face_scan_done as boolean | null,
     bodyScanDone: row.body_scan_done as boolean | null,
+    faceOverallScore: row.face_overall_score as number | null,
+    bodyPostureScore: row.body_posture_score as number | null,
+    bodyDefinitionScore: row.body_definition_score as number | null,
+    bodyFatRangeEstimate: row.body_fat_range_estimate as string | null,
+    nutritionSignalLabel: row.nutrition_signal_label as string | null,
+    nutritionSuggestion: row.nutrition_suggestion as string | null,
     fitmacroUpdatedAt: row.fitmacro_updated_at as string | null,
     fitfaceUpdatedAt: row.fitface_updated_at as string | null,
     createdAt: String(row.created_at),
@@ -102,7 +108,7 @@ export async function registerCoachContextRoutes(app: FastifyInstance) {
         email: user.email,
       },
       profile: profile
-          ? {
+        ? {
             goal: profile.goal,
             calorieTarget: profile.calorieTarget,
             proteinTarget: profile.proteinTarget,

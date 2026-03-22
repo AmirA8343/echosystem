@@ -58,6 +58,12 @@ export type EcosystemDailySummary = {
   sodiumMg: number | null;
   faceScanDone: boolean | null;
   bodyScanDone: boolean | null;
+  faceOverallScore: number | null;
+  bodyPostureScore: number | null;
+  bodyDefinitionScore: number | null;
+  bodyFatRangeEstimate: string | null;
+  nutritionSignalLabel: string | null;
+  nutritionSuggestion: string | null;
   fitmacroUpdatedAt: string | null;
   fitfaceUpdatedAt: string | null;
   createdAt: string;

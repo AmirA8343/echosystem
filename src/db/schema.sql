@@ -44,12 +44,25 @@ create table if not exists ecosystem_daily_summaries (
   sodium_mg integer,
   face_scan_done boolean,
   body_scan_done boolean,
+  face_overall_score integer,
+  body_posture_score integer,
+  body_definition_score integer,
+  body_fat_range_estimate text,
+  nutrition_signal_label text,
+  nutrition_suggestion text,
   fitmacro_updated_at timestamptz,
   fitface_updated_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   primary key (ecosystem_user_id, date)
 );
+
+alter table ecosystem_daily_summaries add column if not exists face_overall_score integer;
+alter table ecosystem_daily_summaries add column if not exists body_posture_score integer;
+alter table ecosystem_daily_summaries add column if not exists body_definition_score integer;
+alter table ecosystem_daily_summaries add column if not exists body_fat_range_estimate text;
+alter table ecosystem_daily_summaries add column if not exists nutrition_signal_label text;
+alter table ecosystem_daily_summaries add column if not exists nutrition_suggestion text;
 
 create index if not exists idx_ecosystem_users_email on ecosystem_users(email);
 create index if not exists idx_daily_summaries_date on ecosystem_daily_summaries(date);
