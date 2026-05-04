@@ -1,5 +1,6 @@
 import "dotenv/config";
 import Fastify from "fastify";
+import { ZodError } from "zod";
 import { registerCoachBriefRoutes } from "./routes/coachBrief.js";
 import { registerCoachContextRoutes } from "./routes/coachContext.js";
 import { registerCoachEventRoutes } from "./routes/coachEvent.js";
@@ -9,6 +10,20 @@ import { registerProfileRoutes } from "./routes/profile.js";
 import { registerUserRoutes } from "./routes/user.js";
 
 const app = Fastify({ logger: true });
+
+app.setErrorHandler((error, _request, reply) => {
+  if (error instanceof ZodError) {
+    return reply.code(400).send({
+      error: "Invalid request.",
+      issues: error.issues,
+    });
+  }
+
+  app.log.error(error);
+  return reply.code(500).send({
+    error: "Internal Server Error",
+  });
+});
 
 app.get("/health", async () => ({ ok: true }));
 
