@@ -19,7 +19,7 @@ const eventBodySchema = z.object({
 
 let ensureCoachEventsSchemaPromise: Promise<void> | null = null;
 
-async function ensureCoachEventsSchema(): Promise<void> {
+export async function ensureCoachEventsSchema(): Promise<void> {
   if (!ensureCoachEventsSchemaPromise) {
     ensureCoachEventsSchemaPromise = pool
       .query(`

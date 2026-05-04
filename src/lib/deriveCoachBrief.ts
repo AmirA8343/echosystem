@@ -2,9 +2,11 @@ import type {
   CoachBrief,
   CoachBriefAdjustment,
   CoachBriefConfidence,
+  CoachFollowThroughSummary,
   CoachBriefMacroTargets,
   CoachBriefRecoveryState,
   CoachBriefSuggestion,
+  CoachEvent,
   EcosystemDailySummary,
   EcosystemProfile,
 } from "../types.js";
@@ -37,6 +39,50 @@ function deriveConfidence(profile: EcosystemProfile | null, summaries: Ecosystem
   if (hasTargets && nutritionDays >= 5 && recoveryDays >= 3) return "high";
   if (hasTargets && nutritionDays >= 2 && (recoveryDays >= 1 || scanDays >= 1)) return "medium";
   return "low";
+}
+
+function deriveFollowThrough(events: CoachEvent[]): CoachFollowThroughSummary {
+  const summary: CoachFollowThroughSummary = {
+    viewedBriefs: 0,
+    actionOpens: 0,
+    mealsLogged: 0,
+    scansCompleted: 0,
+    workoutsOpened: 0,
+    aiChatsSent: 0,
+    lastEventAt: events[0]?.createdAt ?? null,
+    adherence: "unknown",
+  };
+
+  for (const event of events) {
+    if (event.eventType === "brief_viewed") summary.viewedBriefs += 1;
+    if (event.eventType === "brief_action_opened") summary.actionOpens += 1;
+    if (event.eventType === "meal_logged") summary.mealsLogged += 1;
+    if (event.eventType === "scan_completed") summary.scansCompleted += 1;
+    if (event.eventType === "workout_opened") summary.workoutsOpened += 1;
+    if (event.eventType === "ai_chat_sent") summary.aiChatsSent += 1;
+  }
+
+  const actedEvents = summary.actionOpens + summary.mealsLogged + summary.scansCompleted + summary.workoutsOpened;
+  if (events.length === 0) {
+    summary.adherence = "unknown";
+  } else if (summary.mealsLogged >= 5 || actedEvents >= 6) {
+    summary.adherence = "strong";
+  } else if (summary.mealsLogged >= 2 || actedEvents >= 2) {
+    summary.adherence = "mixed";
+  } else {
+    summary.adherence = "low";
+  }
+
+  return summary;
+}
+
+function strengthenConfidence(
+  confidence: CoachBriefConfidence,
+  followThrough: CoachFollowThroughSummary
+): CoachBriefConfidence {
+  if (confidence === "low" && (followThrough.mealsLogged >= 3 || followThrough.scansCompleted >= 1)) return "medium";
+  if (confidence === "medium" && followThrough.mealsLogged >= 6 && followThrough.scansCompleted >= 1) return "high";
+  return confidence;
 }
 
 function deriveRecoveryState(today: EcosystemDailySummary | null): CoachBriefRecoveryState {
@@ -78,7 +124,8 @@ function deriveAdjustment(
   profile: EcosystemProfile | null,
   summaries: EcosystemDailySummary[],
   recoveryState: CoachBriefRecoveryState,
-  confidence: CoachBriefConfidence
+  confidence: CoachBriefConfidence,
+  followThrough: CoachFollowThroughSummary
 ): CoachBriefAdjustment {
   const calorieTarget = Number(profile?.calorieTarget ?? 0);
   const proteinTarget = Number(profile?.proteinTarget ?? 0);
@@ -116,6 +163,15 @@ function deriveAdjustment(
       calorieChange: 0,
       proteinChange: 0,
       reason: "Not enough synced history yet to safely adjust calories.",
+      shouldChangeGoal: false,
+    };
+  }
+
+  if (followThrough.adherence === "low" && followThrough.viewedBriefs > 0) {
+    return {
+      calorieChange: 0,
+      proteinChange: 0,
+      reason: "Follow-through is still low, so the coach is keeping targets stable and focusing on one completed action first.",
       shouldChangeGoal: false,
     };
   }
@@ -238,7 +294,8 @@ function deriveTrainingSuggestion(
 function buildEvidence(
   today: EcosystemDailySummary | null,
   targets: CoachBriefMacroTargets,
-  confidence: CoachBriefConfidence
+  confidence: CoachBriefConfidence,
+  followThrough: CoachFollowThroughSummary
 ): string[] {
   if (!today) return ["No daily summary is available yet."];
 
@@ -247,6 +304,7 @@ function buildEvidence(
     targets.calories ? `Calorie target today: ${targets.calories} kcal.` : "Calorie target is missing.",
     targets.protein ? `Protein target today: ${targets.protein}g.` : "Protein target is missing.",
   ];
+  evidence.push(`Follow-through: ${followThrough.adherence}.`);
 
   const sleepHours = Number(today.sleepHours ?? 0);
   const caloriesLogged = Number(today.caloriesLogged ?? 0);
@@ -266,7 +324,8 @@ function buildCoachMessage(
   targets: CoachBriefMacroTargets,
   adjustment: CoachBriefAdjustment,
   foodSuggestion: CoachBriefSuggestion,
-  trainingSuggestion: CoachBriefSuggestion
+  trainingSuggestion: CoachBriefSuggestion,
+  followThrough: CoachFollowThroughSummary
 ): string {
   const targetText =
     targets.calories && targets.protein
@@ -281,18 +340,24 @@ function buildCoachMessage(
     return `Water retention may be hiding progress today. ${targetText} Keep sodium lower in the next meal, hydrate steadily, and avoid judging your body from one salty day.`;
   }
 
+  if (followThrough.adherence === "low" && followThrough.viewedBriefs > 0) {
+    return `${targetText} Keep the goal simple today: complete one coach action, preferably logging your next meal or opening the suggested plan. ${foodSuggestion.detail}`;
+  }
+
   return `${targetText} ${adjustment.reason} ${foodSuggestion.detail} ${trainingSuggestion.detail}`;
 }
 
 export function deriveCoachBrief(
   ecosystemUserId: string,
   profile: EcosystemProfile | null,
-  summaries: EcosystemDailySummary[]
+  summaries: EcosystemDailySummary[],
+  events: CoachEvent[] = []
 ): CoachBrief {
   const today = summaries[0] ?? null;
-  const confidence = deriveConfidence(profile, summaries);
+  const followThrough = deriveFollowThrough(events);
+  const confidence = strengthenConfidence(deriveConfidence(profile, summaries), followThrough);
   const recoveryState = deriveRecoveryState(today);
-  const adjustment = deriveAdjustment(profile, summaries, recoveryState, confidence);
+  const adjustment = deriveAdjustment(profile, summaries, recoveryState, confidence, followThrough);
   const targets = deriveTargetMacros(profile, adjustment.calorieChange);
   const adjustedTargets = {
     ...targets,
@@ -308,6 +373,9 @@ export function deriveCoachBrief(
   if (!profile?.calorieTarget || !profile?.proteinTarget) {
     cautions.push("Nutrition targets are incomplete, so recommendations are conservative.");
   }
+  if (followThrough.adherence === "low") {
+    cautions.push("Recent follow-through is low, so targets should stay stable until the user completes more actions.");
+  }
 
   return {
     ecosystemUserId,
@@ -315,12 +383,13 @@ export function deriveCoachBrief(
     generatedAt: new Date().toISOString(),
     confidence,
     recoveryState,
+    followThrough,
     todayTargets: adjustedTargets,
     adjustment,
     foodSuggestion,
     trainingSuggestion,
-    coachMessage: buildCoachMessage(recoveryState, adjustedTargets, adjustment, foodSuggestion, trainingSuggestion),
-    evidence: buildEvidence(today, adjustedTargets, confidence),
+    coachMessage: buildCoachMessage(recoveryState, adjustedTargets, adjustment, foodSuggestion, trainingSuggestion, followThrough),
+    evidence: buildEvidence(today, adjustedTargets, confidence, followThrough),
     cautions,
   };
 }

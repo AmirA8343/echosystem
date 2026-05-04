@@ -2,7 +2,8 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { pool } from "../db/pool.js";
 import { deriveCoachBrief } from "../lib/deriveCoachBrief.js";
-import type { EcosystemDailySummary, EcosystemProfile } from "../types.js";
+import { ensureCoachEventsSchema } from "./coachEvent.js";
+import type { CoachEvent, EcosystemDailySummary, EcosystemProfile } from "../types.js";
 
 const querySchema = z.object({
   ecosystemUserId: z.string().uuid(),
@@ -74,10 +75,23 @@ function mapProfileRow(row: Record<string, unknown> | undefined): EcosystemProfi
   };
 }
 
+function mapCoachEventRow(row: Record<string, unknown>): CoachEvent {
+  return {
+    id: String(row.id),
+    ecosystemUserId: String(row.ecosystem_user_id),
+    sourceApp: row.source_app as CoachEvent["sourceApp"],
+    eventType: row.event_type as CoachEvent["eventType"],
+    metadata: (row.metadata as Record<string, unknown> | null) ?? {},
+    createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+  };
+}
+
 export async function registerCoachBriefRoutes(app: FastifyInstance) {
   app.get("/v1/ecosystem/coach-brief", async (request, reply) => {
     const query = querySchema.parse(request.query ?? {});
-    const [userResult, profileResult, summaryResult] = await Promise.all([
+    await ensureCoachEventsSchema();
+
+    const [userResult, profileResult, summaryResult, eventResult] = await Promise.all([
       pool.query(`select * from ecosystem_users where ecosystem_user_id = $1 limit 1`, [query.ecosystemUserId]),
       pool.query(`select * from ecosystem_profiles where ecosystem_user_id = $1 limit 1`, [query.ecosystemUserId]),
       pool.query(
@@ -87,6 +101,14 @@ export async function registerCoachBriefRoutes(app: FastifyInstance) {
          limit 14`,
         [query.ecosystemUserId]
       ),
+      pool.query(
+        `select * from ecosystem_coach_events
+         where ecosystem_user_id = $1
+           and created_at >= now() - interval '14 days'
+         order by created_at desc
+         limit 80`,
+        [query.ecosystemUserId]
+      ),
     ]);
 
     const user = userResult.rows[0];
@@ -94,9 +116,10 @@ export async function registerCoachBriefRoutes(app: FastifyInstance) {
 
     const profile = mapProfileRow(profileResult.rows[0] as Record<string, unknown> | undefined);
     const summaries = summaryResult.rows.map((row) => mapSummaryRow(row as Record<string, unknown>));
+    const events = eventResult.rows.map((row) => mapCoachEventRow(row as Record<string, unknown>));
 
     return {
-      coachBrief: deriveCoachBrief(query.ecosystemUserId, profile, summaries),
+      coachBrief: deriveCoachBrief(query.ecosystemUserId, profile, summaries, events),
     };
   });
 }

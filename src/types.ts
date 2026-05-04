@@ -134,12 +134,26 @@ export type CoachBriefSuggestion = {
   reason: string;
 };
 
+export type CoachFollowThroughAdherence = "strong" | "mixed" | "low" | "unknown";
+
+export type CoachFollowThroughSummary = {
+  viewedBriefs: number;
+  actionOpens: number;
+  mealsLogged: number;
+  scansCompleted: number;
+  workoutsOpened: number;
+  aiChatsSent: number;
+  lastEventAt: string | null;
+  adherence: CoachFollowThroughAdherence;
+};
+
 export type CoachBrief = {
   ecosystemUserId: string;
   date: string | null;
   generatedAt: string;
   confidence: CoachBriefConfidence;
   recoveryState: CoachBriefRecoveryState;
+  followThrough: CoachFollowThroughSummary;
   todayTargets: CoachBriefMacroTargets;
   adjustment: CoachBriefAdjustment;
   foodSuggestion: CoachBriefSuggestion;
