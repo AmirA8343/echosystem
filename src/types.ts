@@ -103,3 +103,48 @@ export type EcosystemWeeklyReview = {
   weeklyMomentum: WeeklyMomentum;
   nextWeekFocus: string;
 };
+
+export type CoachBriefRecoveryState =
+  | "low_sleep"
+  | "under_recovered"
+  | "hydration_low"
+  | "sodium_high"
+  | "ready"
+  | "unknown";
+
+export type CoachBriefConfidence = "low" | "medium" | "high";
+
+export type CoachBriefMacroTargets = {
+  calories: number | null;
+  protein: number | null;
+  carbs: number | null;
+  fat: number | null;
+};
+
+export type CoachBriefAdjustment = {
+  calorieChange: number;
+  proteinChange: number;
+  reason: string;
+  shouldChangeGoal: boolean;
+};
+
+export type CoachBriefSuggestion = {
+  title: string;
+  detail: string;
+  reason: string;
+};
+
+export type CoachBrief = {
+  ecosystemUserId: string;
+  date: string | null;
+  generatedAt: string;
+  confidence: CoachBriefConfidence;
+  recoveryState: CoachBriefRecoveryState;
+  todayTargets: CoachBriefMacroTargets;
+  adjustment: CoachBriefAdjustment;
+  foodSuggestion: CoachBriefSuggestion;
+  trainingSuggestion: CoachBriefSuggestion;
+  coachMessage: string;
+  evidence: string[];
+  cautions: string[];
+};
