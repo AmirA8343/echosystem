@@ -57,6 +57,25 @@ create table if not exists ecosystem_daily_summaries (
   primary key (ecosystem_user_id, date)
 );
 
+create table if not exists ecosystem_coach_events (
+  id uuid primary key default gen_random_uuid(),
+  ecosystem_user_id uuid not null references ecosystem_users(ecosystem_user_id) on delete cascade,
+  source_app text not null check (source_app in ('fitmacro', 'fitface')),
+  event_type text not null check (
+    event_type in (
+      'brief_viewed',
+      'brief_action_opened',
+      'meal_logged',
+      'daily_tracking_updated',
+      'scan_completed',
+      'workout_opened',
+      'ai_chat_sent'
+    )
+  ),
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
 alter table ecosystem_daily_summaries add column if not exists face_overall_score integer;
 alter table ecosystem_daily_summaries add column if not exists body_posture_score integer;
 alter table ecosystem_daily_summaries add column if not exists body_definition_score integer;
@@ -66,3 +85,5 @@ alter table ecosystem_daily_summaries add column if not exists nutrition_suggest
 
 create index if not exists idx_ecosystem_users_email on ecosystem_users(email);
 create index if not exists idx_daily_summaries_date on ecosystem_daily_summaries(date);
+create index if not exists idx_coach_events_user_created_at on ecosystem_coach_events(ecosystem_user_id, created_at desc);
+create index if not exists idx_coach_events_type_created_at on ecosystem_coach_events(event_type, created_at desc);

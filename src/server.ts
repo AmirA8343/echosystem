@@ -2,6 +2,7 @@ import "dotenv/config";
 import Fastify from "fastify";
 import { registerCoachBriefRoutes } from "./routes/coachBrief.js";
 import { registerCoachContextRoutes } from "./routes/coachContext.js";
+import { registerCoachEventRoutes } from "./routes/coachEvent.js";
 import { registerDailySummaryRoutes } from "./routes/dailySummary.js";
 import { registerLinkRoutes } from "./routes/link.js";
 import { registerProfileRoutes } from "./routes/profile.js";
@@ -17,6 +18,7 @@ await registerProfileRoutes(app);
 await registerDailySummaryRoutes(app);
 await registerCoachContextRoutes(app);
 await registerCoachBriefRoutes(app);
+await registerCoachEventRoutes(app);
 
 const port = Number(process.env.PORT || 8081);
 const host = process.env.HOST || "0.0.0.0";

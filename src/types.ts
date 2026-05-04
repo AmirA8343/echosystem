@@ -148,3 +148,23 @@ export type CoachBrief = {
   evidence: string[];
   cautions: string[];
 };
+
+export type CoachEventSourceApp = "fitmacro" | "fitface";
+
+export type CoachEventType =
+  | "brief_viewed"
+  | "brief_action_opened"
+  | "meal_logged"
+  | "daily_tracking_updated"
+  | "scan_completed"
+  | "workout_opened"
+  | "ai_chat_sent";
+
+export type CoachEvent = {
+  id: string;
+  ecosystemUserId: string;
+  sourceApp: CoachEventSourceApp;
+  eventType: CoachEventType;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+};
