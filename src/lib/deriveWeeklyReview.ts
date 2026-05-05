@@ -1,8 +1,12 @@
 import { deriveCoachDecision } from "./deriveCoachDecision.js";
+import { summarizeCoachEvents } from "./summarizeCoachEvents.js";
 import type {
+  CoachBriefConfidence,
+  CoachEvent,
   EcosystemDailySummary,
   EcosystemProfile,
   EcosystemWeeklyReview,
+  WeeklyTargetAdjustment,
 } from "../types.js";
 
 type HabitScore = {
@@ -15,9 +19,128 @@ function average(values: number[]): number | null {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
+function deriveWeeklyTargetAdjustment(
+  profile: EcosystemProfile | null,
+  summaries: EcosystemDailySummary[],
+  events: CoachEvent[]
+): WeeklyTargetAdjustment {
+  const followThrough = summarizeCoachEvents(events);
+  const calorieTarget = Number(profile?.calorieTarget ?? 0);
+  const proteinTarget = Number(profile?.proteinTarget ?? 0);
+  const loggedNutritionDays = summaries.filter((summary) => Number(summary.mealsLogged ?? 0) > 0);
+  const loggedCalories = loggedNutritionDays
+    .map((summary) => Number(summary.caloriesLogged ?? 0))
+    .filter((value) => value > 0);
+  const loggedProtein = loggedNutritionDays
+    .map((summary) => Number(summary.proteinLogged ?? 0))
+    .filter((value) => value > 0);
+  const recoveryDays = summaries.filter((summary) => {
+    const sleepHours = Number(summary.sleepHours ?? 0);
+    const hydrationMl = Number(summary.hydrationMl ?? 0);
+    return sleepHours >= 7 || hydrationMl >= 2200;
+  }).length;
+  const scanDays = summaries.filter((summary) => Boolean(summary.faceScanDone) || Boolean(summary.bodyScanDone)).length;
+  const avgCalories = average(loggedCalories);
+  const avgProtein = average(loggedProtein);
+
+  const confidence: CoachBriefConfidence =
+    loggedNutritionDays.length >= 5 && recoveryDays >= 3 && followThrough.adherence === "strong"
+      ? "high"
+      : loggedNutritionDays.length >= 3 && (recoveryDays >= 1 || scanDays >= 1 || followThrough.adherence === "mixed")
+        ? "medium"
+        : "low";
+
+  if (!calorieTarget || !proteinTarget) {
+    return {
+      confidence: "low",
+      calorieChange: 0,
+      proteinChange: 0,
+      shouldAdjust: false,
+      reason: "Weekly targets cannot adapt until calorie and protein targets are synced from FitMacro.",
+      nextCheckInDays: 7,
+    };
+  }
+
+  if (confidence === "low") {
+    return {
+      confidence,
+      calorieChange: 0,
+      proteinChange: 0,
+      shouldAdjust: false,
+      reason: "Keep targets stable this week; the coach needs more logged meals, recovery data, and follow-through before changing goals.",
+      nextCheckInDays: 7,
+    };
+  }
+
+  if (followThrough.adherence === "low") {
+    return {
+      confidence,
+      calorieChange: 0,
+      proteinChange: 0,
+      shouldAdjust: false,
+      reason: "Targets are not the bottleneck yet. Complete more suggested actions before changing calories.",
+      nextCheckInDays: 7,
+    };
+  }
+
+  if (profile?.goal === "muscle_gain" && avgProtein !== null && avgProtein < proteinTarget * 0.85) {
+    return {
+      confidence,
+      calorieChange: 0,
+      proteinChange: 10,
+      shouldAdjust: true,
+      reason: "Protein averaged below target on logged days, so raise the protein target before increasing calories.",
+      nextCheckInDays: 7,
+    };
+  }
+
+  if (profile?.goal === "fat_loss" && avgCalories !== null && avgCalories > calorieTarget * 1.08) {
+    return {
+      confidence,
+      calorieChange: 0,
+      proteinChange: 0,
+      shouldAdjust: false,
+      reason: "Logged calories averaged above target; improve adherence before lowering the calorie target.",
+      nextCheckInDays: 7,
+    };
+  }
+
+  if (profile?.goal === "fat_loss" && confidence === "high" && recoveryDays >= 4) {
+    return {
+      confidence,
+      calorieChange: -100,
+      proteinChange: 0,
+      shouldAdjust: true,
+      reason: "Recovery and follow-through are strong enough for a small weekly deficit push.",
+      nextCheckInDays: 7,
+    };
+  }
+
+  if (profile?.goal === "muscle_gain" && confidence === "high" && avgCalories !== null && avgCalories >= calorieTarget * 0.95) {
+    return {
+      confidence,
+      calorieChange: 100,
+      proteinChange: 0,
+      shouldAdjust: true,
+      reason: "Logging and recovery are stable, so a small lean-gain calorie increase is reasonable.",
+      nextCheckInDays: 7,
+    };
+  }
+
+  return {
+    confidence,
+    calorieChange: 0,
+    proteinChange: 0,
+    shouldAdjust: false,
+    reason: "Current weekly targets look appropriate; keep collecting data before changing goals.",
+    nextCheckInDays: 7,
+  };
+}
+
 export function deriveWeeklyReview(
   profile: EcosystemProfile | null,
-  summaries: EcosystemDailySummary[]
+  summaries: EcosystemDailySummary[],
+  events: CoachEvent[] = []
 ): EcosystemWeeklyReview | null {
   if (!summaries.length) return null;
 
@@ -96,5 +219,6 @@ export function deriveWeeklyReview(
     weakestHabit,
     weeklyMomentum,
     nextWeekFocus,
+    targetAdjustment: deriveWeeklyTargetAdjustment(profile, summaries, events),
   };
 }

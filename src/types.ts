@@ -97,11 +97,21 @@ export type CoachPrimaryAction = {
 
 export type WeeklyMomentum = "building" | "steady" | "slipping";
 
+export type WeeklyTargetAdjustment = {
+  confidence: CoachBriefConfidence;
+  calorieChange: number;
+  proteinChange: number;
+  shouldAdjust: boolean;
+  reason: string;
+  nextCheckInDays: number;
+};
+
 export type EcosystemWeeklyReview = {
   bestHabit: string;
   weakestHabit: string;
   weeklyMomentum: WeeklyMomentum;
   nextWeekFocus: string;
+  targetAdjustment: WeeklyTargetAdjustment;
 };
 
 export type CoachBriefRecoveryState =

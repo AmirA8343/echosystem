@@ -4,7 +4,8 @@ import { pool } from "../db/pool.js";
 import { deriveCoachDecision } from "../lib/deriveCoachDecision.js";
 import { deriveWeeklyReview } from "../lib/deriveWeeklyReview.js";
 import { deriveNudges } from "../lib/deriveNudges.js";
-import type { EcosystemDailySummary, EcosystemProfile } from "../types.js";
+import { ensureCoachEventsSchema } from "./coachEvent.js";
+import type { CoachEvent, EcosystemDailySummary, EcosystemProfile } from "../types.js";
 
 const querySchema = z.object({
   ecosystemUserId: z.string().uuid(),
@@ -50,17 +51,38 @@ function mapSummaryRow(row: Record<string, unknown>): EcosystemDailySummary {
   } satisfies EcosystemDailySummary;
 }
 
+function mapCoachEventRow(row: Record<string, unknown>): CoachEvent {
+  return {
+    id: String(row.id),
+    ecosystemUserId: String(row.ecosystem_user_id),
+    sourceApp: row.source_app as CoachEvent["sourceApp"],
+    eventType: row.event_type as CoachEvent["eventType"],
+    metadata: (row.metadata as Record<string, unknown> | null) ?? {},
+    createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+  };
+}
+
 export async function registerCoachContextRoutes(app: FastifyInstance) {
   app.get("/v1/ecosystem/coach-context", async (request, reply) => {
     const query = querySchema.parse(request.query ?? {});
-    const [userResult, profileResult, summaryResult] = await Promise.all([
+    await ensureCoachEventsSchema();
+
+    const [userResult, profileResult, summaryResult, eventResult] = await Promise.all([
       pool.query(`select * from ecosystem_users where ecosystem_user_id = $1 limit 1`, [query.ecosystemUserId]),
       pool.query(`select * from ecosystem_profiles where ecosystem_user_id = $1 limit 1`, [query.ecosystemUserId]),
       pool.query(
         `select * from ecosystem_daily_summaries
          where ecosystem_user_id = $1
          order by date desc
-         limit 7`,
+         limit 14`,
+        [query.ecosystemUserId]
+      ),
+      pool.query(
+        `select * from ecosystem_coach_events
+         where ecosystem_user_id = $1
+           and created_at >= now() - interval '14 days'
+         order by created_at desc
+         limit 120`,
         [query.ecosystemUserId]
       ),
     ]);
@@ -95,10 +117,11 @@ export async function registerCoachContextRoutes(app: FastifyInstance) {
     const summaries = summaryResult.rows.map((row) =>
       mapSummaryRow(row as Record<string, unknown>)
     );
+    const events = eventResult.rows.map((row) => mapCoachEventRow(row as Record<string, unknown>));
     const today = summaries[0] ?? null;
 
     const coachDecision = deriveCoachDecision(profile, today);
-    const weeklyReview = deriveWeeklyReview(profile, summaries);
+    const weeklyReview = deriveWeeklyReview(profile, summaries, events);
 
     return {
       user: {
