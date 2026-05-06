@@ -142,7 +142,15 @@ export function deriveWeeklyReview(
   summaries: EcosystemDailySummary[],
   events: CoachEvent[] = []
 ): EcosystemWeeklyReview | null {
-  if (!summaries.length) return null;
+  if (!summaries.length) {
+    return {
+      bestHabit: "No synced habit pattern is clear yet.",
+      weakestHabit: "Daily summaries are missing, so the coach cannot judge the week yet.",
+      weeklyMomentum: "steady",
+      nextWeekFocus: "Sync meals, sleep, steps, hydration, and scans so weekly target changes are based on real behavior.",
+      targetAdjustment: deriveWeeklyTargetAdjustment(profile, summaries, events),
+    };
+  }
 
   const proteinTarget = Number(profile?.proteinTarget ?? 0);
 

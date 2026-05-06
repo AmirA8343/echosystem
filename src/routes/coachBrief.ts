@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { pool } from "../db/pool.js";
 import { deriveCoachBrief } from "../lib/deriveCoachBrief.js";
+import { getLocalDateKey } from "../lib/date.js";
 import { ensureCoachEventsSchema } from "./coachEvent.js";
 import type { CoachEvent, EcosystemDailySummary, EcosystemProfile } from "../types.js";
 
@@ -117,9 +118,10 @@ export async function registerCoachBriefRoutes(app: FastifyInstance) {
     const profile = mapProfileRow(profileResult.rows[0] as Record<string, unknown> | undefined);
     const summaries = summaryResult.rows.map((row) => mapSummaryRow(row as Record<string, unknown>));
     const events = eventResult.rows.map((row) => mapCoachEventRow(row as Record<string, unknown>));
+    const todayDate = getLocalDateKey(profile?.timezone);
 
     return {
-      coachBrief: deriveCoachBrief(query.ecosystemUserId, profile, summaries, events),
+      coachBrief: deriveCoachBrief(query.ecosystemUserId, profile, summaries, events, todayDate),
     };
   });
 }

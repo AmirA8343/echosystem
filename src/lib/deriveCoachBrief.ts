@@ -89,13 +89,13 @@ function deriveTargetMacros(profile: EcosystemProfile | null, calorieAdjustment:
 function deriveAdjustment(
   profile: EcosystemProfile | null,
   summaries: EcosystemDailySummary[],
+  today: EcosystemDailySummary | null,
   recoveryState: CoachBriefRecoveryState,
   confidence: CoachBriefConfidence,
   followThrough: CoachFollowThroughSummary
 ): CoachBriefAdjustment {
   const calorieTarget = Number(profile?.calorieTarget ?? 0);
   const proteinTarget = Number(profile?.proteinTarget ?? 0);
-  const today = summaries[0] ?? null;
   const recentCalories = summaries
     .map((summary) => Number(summary.caloriesLogged ?? 0))
     .filter((value) => value > 0);
@@ -317,13 +317,16 @@ export function deriveCoachBrief(
   ecosystemUserId: string,
   profile: EcosystemProfile | null,
   summaries: EcosystemDailySummary[],
-  events: CoachEvent[] = []
+  events: CoachEvent[] = [],
+  todayDate?: string
 ): CoachBrief {
-  const today = summaries[0] ?? null;
+  const today = todayDate
+    ? summaries.find((summary) => summary.date === todayDate) ?? null
+    : summaries[0] ?? null;
   const followThrough = summarizeCoachEvents(events);
   const confidence = strengthenConfidence(deriveConfidence(profile, summaries), followThrough);
   const recoveryState = deriveRecoveryState(today);
-  const adjustment = deriveAdjustment(profile, summaries, recoveryState, confidence, followThrough);
+  const adjustment = deriveAdjustment(profile, summaries, today, recoveryState, confidence, followThrough);
   const targets = deriveTargetMacros(profile, adjustment.calorieChange);
   const adjustedTargets = {
     ...targets,

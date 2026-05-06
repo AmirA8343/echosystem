@@ -4,6 +4,7 @@ import { pool } from "../db/pool.js";
 import { deriveCoachDecision } from "../lib/deriveCoachDecision.js";
 import { deriveWeeklyReview } from "../lib/deriveWeeklyReview.js";
 import { deriveNudges } from "../lib/deriveNudges.js";
+import { getLocalDateKey } from "../lib/date.js";
 import { ensureCoachEventsSchema } from "./coachEvent.js";
 import type { CoachEvent, EcosystemDailySummary, EcosystemProfile } from "../types.js";
 
@@ -118,7 +119,8 @@ export async function registerCoachContextRoutes(app: FastifyInstance) {
       mapSummaryRow(row as Record<string, unknown>)
     );
     const events = eventResult.rows.map((row) => mapCoachEventRow(row as Record<string, unknown>));
-    const today = summaries[0] ?? null;
+    const todayDate = getLocalDateKey(profile?.timezone);
+    const today = summaries.find((summary) => summary.date === todayDate) ?? null;
 
     const coachDecision = deriveCoachDecision(profile, today);
     const weeklyReview = deriveWeeklyReview(profile, summaries, events);
