@@ -14,6 +14,11 @@ export type SecondaryFocus =
 export type ExperienceLevel = "beginner" | "intermediate" | "advanced";
 export type TimeConstraint = "low" | "moderate" | "high";
 
+export type LocalizedMessage = {
+  key: string;
+  params?: Record<string, string | number>;
+};
+
 export type EcosystemUser = {
   ecosystemUserId: string;
   fitmacroUid: string | null;
@@ -191,4 +196,35 @@ export type CoachEvent = {
   eventType: CoachEventType;
   metadata: Record<string, unknown>;
   createdAt: string;
+};
+
+export type PushTokenSourceApp = CoachEventSourceApp;
+
+export type EcosystemPushToken = {
+  id: string;
+  ecosystemUserId: string;
+  sourceApp: PushTokenSourceApp;
+  expoPushToken: string;
+  platform: "ios" | "android" | "web" | "unknown";
+  deviceId: string | null;
+  enabled: boolean;
+  lastRegisteredAt: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CoachPushNudge = {
+  type: string;
+  title: string;
+  body: string;
+  recommendedApp: "fitmacro" | "fitface" | "either";
+  destinationKey:
+    | "meal_plan"
+    | "meal_history"
+    | "coach_hub"
+    | "daily_tracking"
+    | "ai_health_coach"
+    | "face_workout"
+    | "body_workout"
+    | "home";
 };

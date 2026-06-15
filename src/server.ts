@@ -7,6 +7,7 @@ import { registerCoachEventRoutes } from "./routes/coachEvent.js";
 import { registerDailySummaryRoutes } from "./routes/dailySummary.js";
 import { registerLinkRoutes } from "./routes/link.js";
 import { registerProfileRoutes } from "./routes/profile.js";
+import { registerPushRoutes } from "./routes/push.js";
 import { registerUserRoutes } from "./routes/user.js";
 
 const app = Fastify({ logger: true });
@@ -34,6 +35,7 @@ await registerDailySummaryRoutes(app);
 await registerCoachContextRoutes(app);
 await registerCoachBriefRoutes(app);
 await registerCoachEventRoutes(app);
+await registerPushRoutes(app);
 
 const port = Number(process.env.PORT || 8081);
 const host = process.env.HOST || "0.0.0.0";

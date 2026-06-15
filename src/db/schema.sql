@@ -76,6 +76,32 @@ create table if not exists ecosystem_coach_events (
   created_at timestamptz not null default now()
 );
 
+create table if not exists ecosystem_push_tokens (
+  id uuid primary key default gen_random_uuid(),
+  ecosystem_user_id uuid not null references ecosystem_users(ecosystem_user_id) on delete cascade,
+  source_app text not null check (source_app in ('fitmacro', 'fitface')),
+  expo_push_token text not null unique,
+  platform text not null default 'unknown' check (platform in ('ios', 'android', 'web', 'unknown')),
+  device_id text,
+  enabled boolean not null default true,
+  last_registered_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists ecosystem_push_sends (
+  id uuid primary key default gen_random_uuid(),
+  ecosystem_user_id uuid not null references ecosystem_users(ecosystem_user_id) on delete cascade,
+  source_app text not null check (source_app in ('fitmacro', 'fitface')),
+  expo_push_token text not null,
+  nudge_type text not null,
+  title text not null,
+  body text not null,
+  status text not null check (status in ('sent', 'skipped', 'failed')),
+  response jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
 alter table ecosystem_daily_summaries add column if not exists face_overall_score integer;
 alter table ecosystem_daily_summaries add column if not exists body_posture_score integer;
 alter table ecosystem_daily_summaries add column if not exists body_definition_score integer;
@@ -87,3 +113,5 @@ create index if not exists idx_ecosystem_users_email on ecosystem_users(email);
 create index if not exists idx_daily_summaries_date on ecosystem_daily_summaries(date);
 create index if not exists idx_coach_events_user_created_at on ecosystem_coach_events(ecosystem_user_id, created_at desc);
 create index if not exists idx_coach_events_type_created_at on ecosystem_coach_events(event_type, created_at desc);
+create index if not exists idx_push_tokens_user_source_enabled on ecosystem_push_tokens(ecosystem_user_id, source_app, enabled);
+create index if not exists idx_push_sends_user_created_at on ecosystem_push_sends(ecosystem_user_id, created_at desc);

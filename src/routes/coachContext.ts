@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { pool } from "../db/pool.js";
+import { getPrimaryActionMessages, getWeeklyReviewMessages } from "../lib/coachMessages.js";
 import { deriveCoachDecision } from "../lib/deriveCoachDecision.js";
 import { deriveWeeklyReview } from "../lib/deriveWeeklyReview.js";
 import { deriveNudges } from "../lib/deriveNudges.js";
@@ -124,6 +125,12 @@ export async function registerCoachContextRoutes(app: FastifyInstance) {
 
     const coachDecision = deriveCoachDecision(profile, today);
     const weeklyReview = deriveWeeklyReview(profile, summaries, events);
+    const primaryActionMessages = coachDecision.primaryAction
+      ? getPrimaryActionMessages(coachDecision.primaryAction)
+      : null;
+    const weeklyReviewMessages = weeklyReview
+      ? getWeeklyReviewMessages(weeklyReview)
+      : null;
 
     return {
       user: {
@@ -145,12 +152,26 @@ export async function registerCoachContextRoutes(app: FastifyInstance) {
         : null,
       today,
       nudges: deriveNudges(profile, today),
-      primaryAction: coachDecision.primaryAction,
+      primaryAction: coachDecision.primaryAction
+        ? {
+            ...coachDecision.primaryAction,
+            ...primaryActionMessages,
+          }
+        : null,
       winsToday: coachDecision.winsToday,
       missingToday: coachDecision.missingToday,
       consistencyScore: coachDecision.consistencyScore,
       antiAgingFocus: coachDecision.antiAgingFocus,
-      weeklyReview,
+      weeklyReview: weeklyReview
+        ? {
+            ...weeklyReview,
+            ...weeklyReviewMessages,
+            targetAdjustment: {
+              ...weeklyReview.targetAdjustment,
+              reasonMessage: weeklyReviewMessages?.targetAdjustmentReasonMessage ?? null,
+            },
+          }
+        : null,
     };
   });
 }
