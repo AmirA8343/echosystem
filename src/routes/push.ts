@@ -4,6 +4,7 @@ import { pool } from "../db/pool.js";
 import { personalizeCoachNudge } from "../lib/aiCoachNudge.js";
 import { getLocalDateKey } from "../lib/date.js";
 import { getCoachMealSuggestion } from "../lib/coachMealSuggestions.js";
+import { deriveMicronutrientCoachSuggestion } from "../lib/micronutrientCoach.js";
 import type { CoachPushNudge } from "../types.js";
 
 const sourceAppSchema = z.enum(["fitmacro", "fitface"]);
@@ -86,11 +87,12 @@ function numberOrZero(value: unknown): number {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
-function buildCoachNudge(input: {
+function buildCoachNudgeCandidates(input: {
   sourceApp: "fitmacro" | "fitface";
   profile: Record<string, unknown> | null;
   today: Record<string, unknown> | null;
-}): CoachPushNudge {
+  recentSummaries: Record<string, unknown>[];
+}): CoachPushNudge[] {
   const proteinTarget = numberOrZero(input.profile?.protein_target);
   const proteinLogged = numberOrZero(input.today?.protein_logged);
   const proteinGap = proteinTarget > 0 ? Math.max(0, Math.round(proteinTarget - proteinLogged)) : 0;
@@ -103,85 +105,103 @@ function buildCoachNudge(input: {
   const workoutMinutes = numberOrZero(input.today?.workout_minutes);
   const faceScanDone = input.today?.face_scan_done === true;
   const bodyScanDone = input.today?.body_scan_done === true;
+  const candidates: CoachPushNudge[] = [];
 
   if (proteinGap >= 30) {
     const meal = getCoachMealSuggestion(proteinGap, Math.min(proteinGap, 40));
-    return {
+    candidates.push({
       type: "protein_gap",
       title: "Protein gap check",
       body: `You are about ${proteinGap}g short on protein. Coach option: ${meal.name} (${meal.protein}g protein, ${meal.calories} kcal, ${meal.carbs}g carbs, ${meal.fat}g fat).`,
       recommendedApp: "fitmacro",
       destinationKey: "meal_plan",
-    };
+    });
   }
 
   if (sleepHours > 0 && sleepHours < 6.5) {
-    return {
+    candidates.push({
       type: "low_sleep_recovery",
       title: "Recovery-first day",
       body: `Sleep was ${sleepHours.toFixed(1)}h. Keep training lighter, hydrate early, and keep nutrition steady today.`,
       recommendedApp: input.sourceApp,
       destinationKey: input.sourceApp === "fitmacro" ? "coach_hub" : "daily_tracking",
-    };
+    });
   }
 
   if (hydrationMl > 0 && hydrationMl < 1400) {
-    return {
+    candidates.push({
       type: "hydration_low",
       title: "Hydration check",
       body: `Hydration is around ${Math.round(hydrationMl)} ml. Add water now so recovery and scan signals stay cleaner.`,
       recommendedApp: input.sourceApp,
       destinationKey: input.sourceApp === "fitmacro" ? "coach_hub" : "daily_tracking",
-    };
+    });
   }
 
   if (steps > 0 && steps < 7000) {
-    return {
+    candidates.push({
       type: "movement_low",
       title: "Movement check",
       body: `You are at ${Math.round(steps).toLocaleString()} steps. A 15-20 minute walk is the best next move.`,
       recommendedApp: input.sourceApp,
       destinationKey: input.sourceApp === "fitmacro" ? "coach_hub" : "daily_tracking",
-    };
+    });
   }
 
   if (input.sourceApp === "fitface" && (!faceScanDone || !bodyScanDone)) {
-    return {
+    candidates.push({
       type: "scan_missing",
       title: "Refresh your scan baseline",
       body: `${faceScanDone ? "Body" : bodyScanDone ? "Face" : "Face or body"} scan is still open. A quick scan keeps tomorrow's coaching sharper.`,
       recommendedApp: "fitface",
       destinationKey: faceScanDone ? "body_workout" : "face_workout",
-    };
+    });
   }
 
   if (workoutMinutes <= 0 && input.sourceApp === "fitface") {
-    return {
+    candidates.push({
       type: "workout_missing",
       title: "Training minimum",
       body: "Do a short body session or brisk walk so today's plan has movement data.",
       recommendedApp: "fitface",
       destinationKey: "body_workout",
-    };
+    });
   }
 
   if (calorieGap >= 500 && input.sourceApp === "fitmacro") {
-    return {
+    candidates.push({
       type: "calorie_gap",
       title: "Finish the day clean",
       body: `You still have about ${calorieGap} kcal available. Keep the next meal protein-forward and easy to track.`,
       recommendedApp: "fitmacro",
       destinationKey: "meal_plan",
-    };
+    });
   }
 
-  return {
+  if (input.sourceApp === "fitmacro") {
+    const micronutrientSuggestion = deriveMicronutrientCoachSuggestion({
+      profile: input.profile,
+      summaries: input.recentSummaries,
+    });
+    if (micronutrientSuggestion) {
+      candidates.push({
+        type: `micronutrient_${micronutrientSuggestion.nutrientKey}`,
+        title: micronutrientSuggestion.title,
+        body: micronutrientSuggestion.body,
+        recommendedApp: "fitmacro",
+        destinationKey: "meal_plan",
+      });
+    }
+  }
+
+  candidates.push({
     type: "coach_check_in",
     title: "Coach check-in",
     body: "Open your coach view and complete one small action so tomorrow's plan gets smarter.",
     recommendedApp: input.sourceApp,
     destinationKey: input.sourceApp === "fitmacro" ? "meal_plan" : "ai_health_coach",
-  };
+  });
+  return candidates;
 }
 
 async function getProfileAndToday(ecosystemUserId: string) {
@@ -260,15 +280,18 @@ async function recentlySent(input: {
   sourceApp: "fitmacro" | "fitface";
   nudgeType: string;
 }): Promise<boolean> {
+  const dedupeWindow = input.nudgeType.startsWith("micronutrient_")
+    ? "7 days"
+    : "4 hours";
   const result = await pool.query(
     `select 1 from ecosystem_push_sends
      where ecosystem_user_id = $1
        and source_app = $2
        and nudge_type = $3
        and status = 'sent'
-       and created_at >= now() - interval '4 hours'
+       and created_at >= now() - $4::interval
      limit 1`,
-    [input.ecosystemUserId, input.sourceApp, input.nudgeType]
+    [input.ecosystemUserId, input.sourceApp, input.nudgeType, dedupeWindow]
   );
   return Number(result.rowCount ?? 0) > 0;
 }
@@ -491,31 +514,45 @@ export async function registerPushRoutes(app: FastifyInstance) {
         continue;
       }
 
-      const fallbackNudge = buildCoachNudge({
+      const nudgeCandidates = buildCoachNudgeCandidates({
         sourceApp: token.source_app,
         profile: data.profile,
         today: data.today,
+        recentSummaries: data.summaries,
       });
+      let fallbackNudge: CoachPushNudge | undefined = body.force
+        ? nudgeCandidates[0]
+        : undefined;
+      if (!body.force) {
+        for (const candidate of nudgeCandidates) {
+          const wasRecentlySent = await recentlySent({
+            ecosystemUserId: token.ecosystem_user_id,
+            sourceApp: token.source_app,
+            nudgeType: candidate.type,
+          });
+          if (!wasRecentlySent) {
+            fallbackNudge = candidate;
+            break;
+          }
+        }
+      }
 
-      if (!body.force && (await recentlySent({
-        ecosystemUserId: token.ecosystem_user_id,
-        sourceApp: token.source_app,
-        nudgeType: fallbackNudge.type,
-      }))) {
+      if (!fallbackNudge) {
+        const skippedNudge = nudgeCandidates[0];
         await recordPushSend({
           ecosystemUserId: token.ecosystem_user_id,
           sourceApp: token.source_app,
           expoPushToken: token.expo_push_token,
-          nudge: fallbackNudge,
+          nudge: skippedNudge,
           status: "skipped",
-          response: { reason: "recently_sent" },
+          response: { reason: "all_candidates_recently_sent" },
         });
         results.push({
           ecosystemUserId: token.ecosystem_user_id,
           sourceApp: token.source_app,
-          nudge: fallbackNudge,
+          nudge: skippedNudge,
           status: "skipped",
-          reason: "recently_sent",
+          reason: "all_candidates_recently_sent",
         });
         continue;
       }

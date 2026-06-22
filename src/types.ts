@@ -50,6 +50,21 @@ export type EcosystemProfile = {
   updatedAt: string;
 };
 
+export type MicronutrientTotals = {
+  fiberG?: number;
+  potassiumMg?: number;
+  calciumMg?: number;
+  ironMg?: number;
+  magnesiumMg?: number;
+  zincMg?: number;
+  vitaminAMcg?: number;
+  vitaminCMg?: number;
+  vitaminDMcg?: number;
+  vitaminEMg?: number;
+  vitaminKMcg?: number;
+  vitaminB12Mcg?: number;
+};
+
 export type EcosystemDailySummary = {
   ecosystemUserId: string;
   date: string;
@@ -61,6 +76,7 @@ export type EcosystemDailySummary = {
   sleepHours: number | null;
   hydrationMl: number | null;
   sodiumMg: number | null;
+  micronutrients?: MicronutrientTotals | null;
   faceScanDone: boolean | null;
   bodyScanDone: boolean | null;
   faceOverallScore: number | null;

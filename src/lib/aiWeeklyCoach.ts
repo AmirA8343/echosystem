@@ -39,6 +39,7 @@ type PersonalizeWeeklyCoachInput = {
   profile: Record<string, unknown> | null;
   summaries: Record<string, unknown>[];
   weeklyReview: EcosystemWeeklyReview;
+  micronutrientSuggestion?: Record<string, unknown> | null;
 };
 
 const normalizeLocale = (locale?: string | null): string => {
@@ -48,7 +49,10 @@ const normalizeLocale = (locale?: string | null): string => {
   return localeNames[base] ? base : "en";
 };
 
-const fallbackCoach = (review: EcosystemWeeklyReview): AiWeeklyCoach => ({
+const fallbackCoach = (
+  review: EcosystemWeeklyReview,
+  micronutrientSuggestion?: Record<string, unknown> | null
+): AiWeeklyCoach => ({
   headline:
     review.weeklyMomentum === "building"
       ? "Your momentum is building"
@@ -56,7 +60,10 @@ const fallbackCoach = (review: EcosystemWeeklyReview): AiWeeklyCoach => ({
         ? "Reset one habit this week"
         : "Your week is holding steady",
   summary: `${review.bestHabit} ${review.weakestHabit}`,
-  focus: review.nextWeekFocus,
+  focus:
+    typeof micronutrientSuggestion?.body === "string"
+      ? micronutrientSuggestion.body
+      : review.nextWeekFocus,
   action: review.targetAdjustment.reason,
   personalizedByAi: false,
   model: null,
@@ -86,7 +93,7 @@ const extractNumbers = (value: string): Set<string> =>
 export async function personalizeWeeklyCoach(
   input: PersonalizeWeeklyCoachInput
 ): Promise<AiWeeklyCoach> {
-  const fallback = fallbackCoach(input.weeklyReview);
+  const fallback = fallbackCoach(input.weeklyReview, input.micronutrientSuggestion);
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   if (!apiKey) {
     console.warn("[AI weekly coach] using deterministic fallback: OPENAI_API_KEY is missing");
@@ -101,8 +108,13 @@ export async function personalizeWeeklyCoach(
   try {
     const source = JSON.stringify({
       profile: input.profile,
-      summaries: input.summaries.slice(0, 14),
+      summaries: input.summaries.slice(0, 14).map((summary) =>
+        Object.fromEntries(
+          Object.entries(summary).filter(([key]) => key !== "micronutrients")
+        )
+      ),
       weeklyReview: input.weeklyReview,
+      micronutrientSuggestion: input.micronutrientSuggestion ?? null,
     });
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
@@ -121,6 +133,7 @@ export async function personalizeWeeklyCoach(
           "Nutrition data comes from FitMacro. Sleep, movement, hydration, and visual scan signals can come from FitFace.",
           "Do not diagnose, prescribe treatment, shame the user, promise outcomes, or invent facts or measurements.",
           "Prioritize sustainable energy, recovery, strength, nutrition, and consistency without claiming to reverse aging.",
+          "If a micronutrient suggestion is supplied, describe it only as a trend in logged food, recommend only the listed foods, and never call it a deficiency or recommend supplement doses.",
           "Recommend one achievable focus and one concrete action. Do not change calculated targets.",
           "Do not include numeric digits anywhere in the response. Do not restate dates, measurements, scores, amounts, or targets because the app displays calculated values separately.",
           `Write in ${localeNames[locale]}.`,

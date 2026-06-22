@@ -115,7 +115,11 @@ export async function personalizeCoachNudge(
           },
           profile: input.profile,
           today: input.today,
-          recentSummaries: input.recentSummaries.slice(0, 7),
+          recentSummaries: input.recentSummaries.slice(0, 7).map((summary) =>
+            Object.fromEntries(
+              Object.entries(summary).filter(([key]) => key !== "micronutrients")
+            )
+          ),
         }),
         text: {
           format: {

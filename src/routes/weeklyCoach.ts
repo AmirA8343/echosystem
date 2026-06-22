@@ -4,6 +4,7 @@ import { z } from "zod";
 import { pool } from "../db/pool.js";
 import { personalizeWeeklyCoach, type AiWeeklyCoach } from "../lib/aiWeeklyCoach.js";
 import { deriveWeeklyReview } from "../lib/deriveWeeklyReview.js";
+import { deriveMicronutrientCoachSuggestion } from "../lib/micronutrientCoach.js";
 import { ensureCoachEventsSchema } from "./coachEvent.js";
 import type { CoachEvent, EcosystemDailySummary, EcosystemProfile } from "../types.js";
 
@@ -37,6 +38,10 @@ const mapSummary = (row: Record<string, unknown>): EcosystemDailySummary => ({
   sleepHours: Number(row.sleep_hours ?? 0) || null,
   hydrationMl: row.hydration_ml as number | null,
   sodiumMg: row.sodium_mg as number | null,
+  micronutrients:
+    row.micronutrients && typeof row.micronutrients === "object"
+      ? (row.micronutrients as EcosystemDailySummary["micronutrients"])
+      : null,
   faceScanDone: row.face_scan_done as boolean | null,
   bodyScanDone: row.body_scan_done as boolean | null,
   faceOverallScore: row.face_overall_score as number | null,
@@ -115,9 +120,13 @@ export async function registerWeeklyCoachRoutes(app: FastifyInstance) {
     const events = eventResult.rows.map((row) => mapEvent(row as Record<string, unknown>));
     const weeklyReview = deriveWeeklyReview(profile, summaries, events);
     if (!weeklyReview) return reply.code(404).send({ error: "Weekly coach data is unavailable." });
+    const micronutrientSuggestion = deriveMicronutrientCoachSuggestion({
+      profile: profile as unknown as Record<string, unknown> | null,
+      summaries: summaries as unknown as Record<string, unknown>[],
+    });
 
     const contextHash = createHash("sha256")
-      .update(JSON.stringify({ profile, summaries, weeklyReview }))
+      .update(JSON.stringify({ profile, summaries, weeklyReview, micronutrientSuggestion }))
       .digest("hex");
     const locale = query.locale ?? "en";
     const cacheKey = `${query.ecosystemUserId}:${locale}`;
@@ -128,12 +137,18 @@ export async function registerWeeklyCoachRoutes(app: FastifyInstance) {
         {
           locale,
           model: cached.coach.model,
+          micronutrientCoachingApplied: micronutrientSuggestion !== null,
           personalizedByAi: cached.coach.personalizedByAi,
           userRef,
         },
         "Weekly coach cache hit"
       );
-      return { weeklyCoach: cached.coach, weeklyReview, cached: true };
+      return {
+        weeklyCoach: cached.coach,
+        weeklyReview,
+        micronutrientSuggestion,
+        cached: true,
+      };
     }
 
     const weeklyCoach = await personalizeWeeklyCoach({
@@ -141,12 +156,14 @@ export async function registerWeeklyCoachRoutes(app: FastifyInstance) {
       profile: profile as unknown as Record<string, unknown> | null,
       summaries: summaries as unknown as Record<string, unknown>[],
       weeklyReview,
+      micronutrientSuggestion,
     });
 
     app.log.info(
       {
         locale,
         model: weeklyCoach.model,
+        micronutrientCoachingApplied: micronutrientSuggestion !== null,
         personalizedByAi: weeklyCoach.personalizedByAi,
         userRef,
       },
@@ -160,6 +177,11 @@ export async function registerWeeklyCoachRoutes(app: FastifyInstance) {
       coach: weeklyCoach,
     });
 
-    return { weeklyCoach, weeklyReview, cached: false };
+    return {
+      weeklyCoach,
+      weeklyReview,
+      micronutrientSuggestion,
+      cached: false,
+    };
   });
 }

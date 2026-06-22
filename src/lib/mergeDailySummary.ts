@@ -1,4 +1,4 @@
-import type { SummarySource } from "../types.js";
+import type { MicronutrientTotals, SummarySource } from "../types.js";
 
 export type DailySummaryPatch = {
   caloriesLogged?: number;
@@ -9,6 +9,7 @@ export type DailySummaryPatch = {
   sleepHours?: number;
   hydrationMl?: number;
   sodiumMg?: number;
+  micronutrients?: MicronutrientTotals;
   faceScanDone?: boolean;
   bodyScanDone?: boolean;
   faceOverallScore?: number;
@@ -19,7 +20,13 @@ export type DailySummaryPatch = {
   nutritionSuggestion?: string;
 };
 
-const FITMACRO_FIELDS = ["caloriesLogged", "proteinLogged", "mealsLogged", "sodiumMg"] as const;
+const FITMACRO_FIELDS = [
+  "caloriesLogged",
+  "proteinLogged",
+  "mealsLogged",
+  "sodiumMg",
+  "micronutrients",
+] as const;
 const FITFACE_FIELDS = [
   "workoutMinutes",
   "steps",
@@ -41,7 +48,7 @@ export function sanitizeDailySummaryPatch(
 ): DailySummaryPatch {
   const allowed: readonly (keyof DailySummaryPatch)[] =
     source === "fitmacro" ? FITMACRO_FIELDS : FITFACE_FIELDS;
-  const out: Record<string, number | boolean | string | undefined> = {};
+  const out: Record<string, number | boolean | string | MicronutrientTotals | undefined> = {};
 
   for (const key of allowed) {
     const value = patch[key];

@@ -3,6 +3,21 @@ import { z } from "zod";
 import { pool } from "../db/pool.js";
 import { sanitizeDailySummaryPatch } from "../lib/mergeDailySummary.js";
 
+const micronutrientsSchema = z.object({
+  fiberG: z.number().nonnegative().optional(),
+  potassiumMg: z.number().nonnegative().optional(),
+  calciumMg: z.number().nonnegative().optional(),
+  ironMg: z.number().nonnegative().optional(),
+  magnesiumMg: z.number().nonnegative().optional(),
+  zincMg: z.number().nonnegative().optional(),
+  vitaminAMcg: z.number().nonnegative().optional(),
+  vitaminCMg: z.number().nonnegative().optional(),
+  vitaminDMcg: z.number().nonnegative().optional(),
+  vitaminEMg: z.number().nonnegative().optional(),
+  vitaminKMcg: z.number().nonnegative().optional(),
+  vitaminB12Mcg: z.number().nonnegative().optional(),
+});
+
 const summaryBodySchema = z.object({
   ecosystemUserId: z.string().uuid(),
   date: z.string().min(10).max(10),
@@ -16,6 +31,7 @@ const summaryBodySchema = z.object({
     sleepHours: z.number().optional(),
     hydrationMl: z.number().int().optional(),
     sodiumMg: z.number().int().optional(),
+    micronutrients: micronutrientsSchema.optional(),
     faceScanDone: z.boolean().optional(),
     bodyScanDone: z.boolean().optional(),
     faceOverallScore: z.number().int().optional(),
@@ -26,6 +42,20 @@ const summaryBodySchema = z.object({
     nutritionSuggestion: z.string().optional(),
   }),
 });
+
+let ensureDailySummarySchemaPromise: Promise<void> | null = null;
+
+export async function ensureDailySummarySchema(): Promise<void> {
+  if (!ensureDailySummarySchemaPromise) {
+    ensureDailySummarySchemaPromise = pool
+      .query(
+        `alter table ecosystem_daily_summaries
+         add column if not exists micronutrients jsonb`
+      )
+      .then(() => undefined);
+  }
+  await ensureDailySummarySchemaPromise;
+}
 
 const summaryQuerySchema = z.object({
   ecosystemUserId: z.string().uuid(),
@@ -57,6 +87,7 @@ function mapDailySummary(row: Record<string, unknown>) {
     sleepHours: Number(row.sleep_hours ?? 0) || null,
     hydrationMl: row.hydration_ml,
     sodiumMg: row.sodium_mg,
+    micronutrients: row.micronutrients ?? null,
     faceScanDone: row.face_scan_done,
     bodyScanDone: row.body_scan_done,
     faceOverallScore: row.face_overall_score,
@@ -70,6 +101,7 @@ function mapDailySummary(row: Record<string, unknown>) {
 
 export async function registerDailySummaryRoutes(app: FastifyInstance) {
   app.post("/v1/ecosystem/daily-summary", async (request) => {
+    await ensureDailySummarySchema();
     const body = summaryBodySchema.parse(request.body ?? {});
     const patch = sanitizeDailySummaryPatch(body.source, body.summary);
     const timestampColumn = body.source === "fitmacro" ? "fitmacro_updated_at" : "fitface_updated_at";
@@ -88,6 +120,7 @@ export async function registerDailySummaryRoutes(app: FastifyInstance) {
       sleepHours: patch.sleepHours ?? current.rows[0]?.sleep_hours ?? null,
       hydrationMl: patch.hydrationMl ?? current.rows[0]?.hydration_ml ?? null,
       sodiumMg: patch.sodiumMg ?? current.rows[0]?.sodium_mg ?? null,
+      micronutrients: patch.micronutrients ?? current.rows[0]?.micronutrients ?? null,
       faceScanDone: patch.faceScanDone ?? current.rows[0]?.face_scan_done ?? null,
       bodyScanDone: patch.bodyScanDone ?? current.rows[0]?.body_scan_done ?? null,
       faceOverallScore: patch.faceOverallScore ?? current.rows[0]?.face_overall_score ?? null,
@@ -101,14 +134,14 @@ export async function registerDailySummaryRoutes(app: FastifyInstance) {
     const result = await pool.query(
       `insert into ecosystem_daily_summaries (
          ecosystem_user_id, date, calories_logged, protein_logged, meals_logged,
-         workout_minutes, steps, sleep_hours, hydration_ml, sodium_mg, face_scan_done, body_scan_done,
+         workout_minutes, steps, sleep_hours, hydration_ml, sodium_mg, micronutrients, face_scan_done, body_scan_done,
          face_overall_score, body_posture_score, body_definition_score, body_fat_range_estimate,
          nutrition_signal_label, nutrition_suggestion, ${timestampColumn}
        ) values (
          $1, $2, $3, $4, $5,
-         $6, $7, $8, $9, $10, $11, $12,
-         $13, $14, $15, $16,
-         $17, $18, now()
+         $6, $7, $8, $9, $10, $11, $12, $13,
+         $14, $15, $16, $17,
+         $18, $19, now()
        )
        on conflict (ecosystem_user_id, date) do update set
          calories_logged = excluded.calories_logged,
@@ -119,6 +152,7 @@ export async function registerDailySummaryRoutes(app: FastifyInstance) {
          sleep_hours = excluded.sleep_hours,
          hydration_ml = excluded.hydration_ml,
          sodium_mg = excluded.sodium_mg,
+         micronutrients = excluded.micronutrients,
          face_scan_done = excluded.face_scan_done,
          body_scan_done = excluded.body_scan_done,
          face_overall_score = excluded.face_overall_score,
@@ -141,6 +175,7 @@ export async function registerDailySummaryRoutes(app: FastifyInstance) {
         merged.sleepHours,
         merged.hydrationMl,
         merged.sodiumMg,
+        merged.micronutrients,
         merged.faceScanDone,
         merged.bodyScanDone,
         merged.faceOverallScore,
@@ -153,6 +188,20 @@ export async function registerDailySummaryRoutes(app: FastifyInstance) {
     );
 
     const row = result.rows[0] as Record<string, unknown>;
+    if (patch.micronutrients) {
+      app.log.info(
+        {
+          date: body.date,
+          nutrientCount: Object.values(patch.micronutrients).filter(
+            (value) => Number(value) > 0
+          ).length,
+          recommendationsEnabled:
+            process.env.MICRONUTRIENT_COACHING_ENABLED === "true",
+          userRef: body.ecosystemUserId.slice(-8),
+        },
+        "Micronutrient daily summary stored"
+      );
+    }
     return {
       ok: true,
       dailySummary: mapDailySummary(row),
@@ -160,6 +209,7 @@ export async function registerDailySummaryRoutes(app: FastifyInstance) {
   });
 
   app.get("/v1/ecosystem/daily-summary", async (request, reply) => {
+    await ensureDailySummarySchema();
     const query = summaryQuerySchema.parse(request.query ?? {});
     const result = await pool.query(
       `select * from ecosystem_daily_summaries where ecosystem_user_id = $1 and date = $2 limit 1`,

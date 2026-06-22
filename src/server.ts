@@ -2,6 +2,7 @@ import "dotenv/config";
 import Fastify from "fastify";
 import { ZodError } from "zod";
 import { startCoachPushScheduler } from "./jobs/coachPushScheduler.js";
+import { isMicronutrientCoachingEnabled } from "./lib/micronutrientCoach.js";
 import { registerCoachBriefRoutes } from "./routes/coachBrief.js";
 import { registerCoachContextRoutes } from "./routes/coachContext.js";
 import { registerCoachEventRoutes } from "./routes/coachEvent.js";
@@ -13,6 +14,11 @@ import { registerUserRoutes } from "./routes/user.js";
 import { registerWeeklyCoachRoutes } from "./routes/weeklyCoach.js";
 
 const app = Fastify({ logger: true });
+
+app.log.info(
+  { enabled: isMicronutrientCoachingEnabled() },
+  "Micronutrient coaching feature flag loaded"
+);
 
 app.setErrorHandler((error, _request, reply) => {
   if (error instanceof ZodError) {
