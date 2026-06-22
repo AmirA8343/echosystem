@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { pool } from "../db/pool.js";
+import { personalizeCoachNudge } from "../lib/aiCoachNudge.js";
 import { getLocalDateKey } from "../lib/date.js";
 import { getCoachMealSuggestion } from "../lib/coachMealSuggestions.js";
 import type { CoachPushNudge } from "../types.js";
@@ -13,6 +14,7 @@ const pushTokenBodySchema = z.object({
   sourceApp: sourceAppSchema,
   expoPushToken: z.string().trim().min(10),
   platform: platformSchema.default("unknown"),
+  locale: z.string().trim().min(2).max(16).optional(),
   deviceId: z.string().trim().min(1).optional(),
   enabled: z.boolean().default(true),
 });
@@ -22,6 +24,7 @@ const sendCoachNudgeBodySchema = z.object({
   sourceApp: sourceAppSchema.optional(),
   dryRun: z.boolean().default(true),
   force: z.boolean().default(false),
+  scheduled: z.boolean().default(false),
   adminSecret: z.string().optional(),
 });
 
@@ -41,6 +44,7 @@ export async function ensurePushSchema(): Promise<void> {
           source_app text not null check (source_app in ('fitmacro', 'fitface')),
           expo_push_token text not null unique,
           platform text not null default 'unknown' check (platform in ('ios', 'android', 'web', 'unknown')),
+          preferred_locale text not null default 'en',
           device_id text,
           enabled boolean not null default true,
           last_registered_at timestamptz not null default now(),
@@ -67,6 +71,9 @@ export async function ensurePushSchema(): Promise<void> {
           on ecosystem_push_sends(ecosystem_user_id, created_at desc);
         create index if not exists idx_push_sends_dedupe
           on ecosystem_push_sends(ecosystem_user_id, source_app, nudge_type, created_at desc);
+
+        alter table ecosystem_push_tokens
+          add column if not exists preferred_locale text not null default 'en';
       `)
       .then(() => undefined);
   }
@@ -113,8 +120,8 @@ function buildCoachNudge(input: {
       type: "low_sleep_recovery",
       title: "Recovery-first day",
       body: `Sleep was ${sleepHours.toFixed(1)}h. Keep training lighter, hydrate early, and keep nutrition steady today.`,
-      recommendedApp: "fitface",
-      destinationKey: "daily_tracking",
+      recommendedApp: input.sourceApp,
+      destinationKey: input.sourceApp === "fitmacro" ? "coach_hub" : "daily_tracking",
     };
   }
 
@@ -123,8 +130,8 @@ function buildCoachNudge(input: {
       type: "hydration_low",
       title: "Hydration check",
       body: `Hydration is around ${Math.round(hydrationMl)} ml. Add water now so recovery and scan signals stay cleaner.`,
-      recommendedApp: "fitface",
-      destinationKey: "daily_tracking",
+      recommendedApp: input.sourceApp,
+      destinationKey: input.sourceApp === "fitmacro" ? "coach_hub" : "daily_tracking",
     };
   }
 
@@ -133,8 +140,8 @@ function buildCoachNudge(input: {
       type: "movement_low",
       title: "Movement check",
       body: `You are at ${Math.round(steps).toLocaleString()} steps. A 15-20 minute walk is the best next move.`,
-      recommendedApp: "fitface",
-      destinationKey: "daily_tracking",
+      recommendedApp: input.sourceApp,
+      destinationKey: input.sourceApp === "fitmacro" ? "coach_hub" : "daily_tracking",
     };
   }
 
@@ -188,18 +195,64 @@ async function getProfileAndToday(ecosystemUserId: string) {
 
   const profile = (profileResult.rows[0] as Record<string, unknown> | undefined) ?? null;
   const todayDate = getLocalDateKey(String(profile?.timezone ?? "America/Toronto"));
-  const todayResult = await pool.query(
-    `select * from ecosystem_daily_summaries
-     where ecosystem_user_id = $1 and date = $2::date
-     limit 1`,
-    [ecosystemUserId, todayDate]
-  );
+  const [todayResult, summaryResult] = await Promise.all([
+    pool.query(
+      `select * from ecosystem_daily_summaries
+       where ecosystem_user_id = $1 and date = $2::date
+       limit 1`,
+      [ecosystemUserId, todayDate]
+    ),
+    pool.query(
+      `select * from ecosystem_daily_summaries
+       where ecosystem_user_id = $1
+       order by date desc
+       limit 7`,
+      [ecosystemUserId]
+    ),
+  ]);
+  const summaries = summaryResult.rows as Array<Record<string, unknown>>;
 
   return {
     user,
     profile,
     today: (todayResult.rows[0] as Record<string, unknown> | undefined) ?? null,
+    summaries,
   };
+}
+
+function getLocalHour(timezone: string): number | null {
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+      hour: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(new Date());
+    const hour = Number(parts.find((part) => part.type === "hour")?.value);
+    return Number.isFinite(hour) ? hour : null;
+  } catch {
+    return null;
+  }
+}
+
+function isScheduledCoachWindow(timezone: string): boolean {
+  const hour = getLocalHour(timezone);
+  return hour !== null && [8, 12, 18, 20].includes(hour);
+}
+
+async function reachedDailySendLimit(input: {
+  ecosystemUserId: string;
+  sourceApp: "fitmacro" | "fitface";
+}): Promise<boolean> {
+  const result = await pool.query(
+    `select count(*)::int as send_count
+     from ecosystem_push_sends
+     where ecosystem_user_id = $1
+       and source_app = $2
+       and status = 'sent'
+       and created_at >= now() - interval '20 hours'`,
+    [input.ecosystemUserId, input.sourceApp]
+  );
+  return Number(result.rows[0]?.send_count ?? 0) >= 3;
 }
 
 async function recentlySent(input: {
@@ -263,6 +316,7 @@ async function sendExpoPush(input: {
       title: input.nudge.title,
       body: input.nudge.body,
       sound: "default",
+      channelId: "meal-reminders",
       data: {
         ecosystemUserId: input.ecosystemUserId,
         sourceApp: input.sourceApp,
@@ -294,22 +348,24 @@ export async function registerPushRoutes(app: FastifyInstance) {
 
     const result = await pool.query(
       `insert into ecosystem_push_tokens (
-         ecosystem_user_id, source_app, expo_push_token, platform, device_id, enabled
-       ) values ($1, $2, $3, $4, $5, $6)
+         ecosystem_user_id, source_app, expo_push_token, platform, preferred_locale, device_id, enabled
+       ) values ($1, $2, $3, $4, $5, $6, $7)
        on conflict (expo_push_token) do update
        set ecosystem_user_id = excluded.ecosystem_user_id,
            source_app = excluded.source_app,
            platform = excluded.platform,
+           preferred_locale = excluded.preferred_locale,
            device_id = excluded.device_id,
            enabled = excluded.enabled,
            last_registered_at = now(),
            updated_at = now()
-       returning id, ecosystem_user_id, source_app, expo_push_token, platform, device_id, enabled, last_registered_at, created_at, updated_at`,
+       returning id, ecosystem_user_id, source_app, expo_push_token, platform, preferred_locale, device_id, enabled, last_registered_at, created_at, updated_at`,
       [
         body.ecosystemUserId,
         body.sourceApp,
         body.expoPushToken,
         body.platform,
+        body.locale ?? "en",
         body.deviceId ?? null,
         body.enabled,
       ]
@@ -323,6 +379,7 @@ export async function registerPushRoutes(app: FastifyInstance) {
         ecosystemUserId: row.ecosystem_user_id,
         sourceApp: row.source_app,
         platform: row.platform,
+        locale: row.preferred_locale,
         deviceId: row.device_id,
         enabled: row.enabled,
         lastRegisteredAt: row.last_registered_at,
@@ -337,7 +394,7 @@ export async function registerPushRoutes(app: FastifyInstance) {
     await ensurePushSchema();
 
     const result = await pool.query(
-      `select id, ecosystem_user_id, source_app, platform, device_id, enabled, last_registered_at, created_at, updated_at
+      `select id, ecosystem_user_id, source_app, platform, preferred_locale, device_id, enabled, last_registered_at, created_at, updated_at
        from ecosystem_push_tokens
        where ecosystem_user_id = $1
        order by updated_at desc`,
@@ -350,6 +407,7 @@ export async function registerPushRoutes(app: FastifyInstance) {
         ecosystemUserId: row.ecosystem_user_id,
         sourceApp: row.source_app,
         platform: row.platform,
+        locale: row.preferred_locale,
         deviceId: row.device_id,
         enabled: row.enabled,
         lastRegisteredAt: row.last_registered_at,
@@ -381,7 +439,7 @@ export async function registerPushRoutes(app: FastifyInstance) {
     }
 
     const tokenResult = await pool.query(
-      `select ecosystem_user_id, source_app, expo_push_token
+      `select ecosystem_user_id, source_app, expo_push_token, preferred_locale
        from ecosystem_push_tokens
        where enabled = true
          and ($1::uuid is null or ecosystem_user_id = $1)
@@ -396,11 +454,44 @@ export async function registerPushRoutes(app: FastifyInstance) {
       ecosystem_user_id: string;
       source_app: "fitmacro" | "fitface";
       expo_push_token: string;
+      preferred_locale: string;
     }>) {
       const data = await getProfileAndToday(token.ecosystem_user_id);
       if (!data) continue;
 
-      const nudge = buildCoachNudge({
+      const timezone = String(data.profile?.timezone ?? "America/Toronto");
+      if (
+        body.scheduled &&
+        !body.force &&
+        !isScheduledCoachWindow(timezone)
+      ) {
+        results.push({
+          ecosystemUserId: token.ecosystem_user_id,
+          sourceApp: token.source_app,
+          status: "skipped",
+          reason: "outside_coach_window",
+        });
+        continue;
+      }
+
+      if (
+        body.scheduled &&
+        !body.force &&
+        (await reachedDailySendLimit({
+          ecosystemUserId: token.ecosystem_user_id,
+          sourceApp: token.source_app,
+        }))
+      ) {
+        results.push({
+          ecosystemUserId: token.ecosystem_user_id,
+          sourceApp: token.source_app,
+          status: "skipped",
+          reason: "daily_send_limit",
+        });
+        continue;
+      }
+
+      const fallbackNudge = buildCoachNudge({
         sourceApp: token.source_app,
         profile: data.profile,
         today: data.today,
@@ -409,25 +500,35 @@ export async function registerPushRoutes(app: FastifyInstance) {
       if (!body.force && (await recentlySent({
         ecosystemUserId: token.ecosystem_user_id,
         sourceApp: token.source_app,
-        nudgeType: nudge.type,
+        nudgeType: fallbackNudge.type,
       }))) {
         await recordPushSend({
           ecosystemUserId: token.ecosystem_user_id,
           sourceApp: token.source_app,
           expoPushToken: token.expo_push_token,
-          nudge,
+          nudge: fallbackNudge,
           status: "skipped",
           response: { reason: "recently_sent" },
         });
         results.push({
           ecosystemUserId: token.ecosystem_user_id,
           sourceApp: token.source_app,
-          nudge,
+          nudge: fallbackNudge,
           status: "skipped",
           reason: "recently_sent",
         });
         continue;
       }
+
+      const personalized = await personalizeCoachNudge({
+        fallback: fallbackNudge,
+        sourceApp: token.source_app,
+        locale: token.preferred_locale,
+        profile: data.profile,
+        today: data.today,
+        recentSummaries: data.summaries,
+      });
+      const nudge = personalized.nudge;
 
       if (body.dryRun) {
         results.push({
@@ -435,6 +536,8 @@ export async function registerPushRoutes(app: FastifyInstance) {
           sourceApp: token.source_app,
           nudge,
           status: "dry_run",
+          personalizedByAi: personalized.personalizedByAi,
+          model: personalized.model,
         });
         continue;
       }
@@ -452,13 +555,19 @@ export async function registerPushRoutes(app: FastifyInstance) {
         expoPushToken: token.expo_push_token,
         nudge,
         status,
-        response: expoResponse,
+        response: {
+          ...expoResponse,
+          personalizedByAi: personalized.personalizedByAi,
+          model: personalized.model,
+        },
       });
       results.push({
         ecosystemUserId: token.ecosystem_user_id,
         sourceApp: token.source_app,
         nudge,
         status,
+        personalizedByAi: personalized.personalizedByAi,
+        model: personalized.model,
         response: expoResponse,
       });
     }

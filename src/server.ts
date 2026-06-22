@@ -1,6 +1,7 @@
 import "dotenv/config";
 import Fastify from "fastify";
 import { ZodError } from "zod";
+import { startCoachPushScheduler } from "./jobs/coachPushScheduler.js";
 import { registerCoachBriefRoutes } from "./routes/coachBrief.js";
 import { registerCoachContextRoutes } from "./routes/coachContext.js";
 import { registerCoachEventRoutes } from "./routes/coachEvent.js";
@@ -9,6 +10,7 @@ import { registerLinkRoutes } from "./routes/link.js";
 import { registerProfileRoutes } from "./routes/profile.js";
 import { registerPushRoutes } from "./routes/push.js";
 import { registerUserRoutes } from "./routes/user.js";
+import { registerWeeklyCoachRoutes } from "./routes/weeklyCoach.js";
 
 const app = Fastify({ logger: true });
 
@@ -36,6 +38,8 @@ await registerCoachContextRoutes(app);
 await registerCoachBriefRoutes(app);
 await registerCoachEventRoutes(app);
 await registerPushRoutes(app);
+await registerWeeklyCoachRoutes(app);
+startCoachPushScheduler(app);
 
 const port = Number(process.env.PORT || 8081);
 const host = process.env.HOST || "0.0.0.0";
