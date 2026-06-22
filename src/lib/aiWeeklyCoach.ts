@@ -121,6 +121,7 @@ export async function personalizeWeeklyCoach(
           "Nutrition data comes from FitMacro. Sleep, movement, hydration, and visual scan signals can come from FitFace.",
           "Do not diagnose, prescribe treatment, shame the user, promise outcomes, or invent facts or measurements.",
           "Recommend one achievable focus and one concrete action. Do not change calculated targets.",
+          "Do not include numeric digits anywhere in the response. Do not restate dates, measurements, scores, amounts, or targets because the app displays calculated values separately.",
           `Write in ${localeNames[locale]}.`,
         ].join(" "),
         input: source,
