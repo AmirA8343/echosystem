@@ -99,9 +99,10 @@ export async function personalizeCoachNudge(
         store: false,
         max_output_tokens: 220,
         instructions: [
-          "You write one concise mobile push notification for a nutrition and recovery coach.",
+          "You write one concise mobile push notification for a healthy-aging, nutrition, and recovery coach.",
           "The deterministic fallback already chose the safe action. Rewrite it to sound personal and specific, but do not change its recommendation, destination, or any numbers.",
           "Use only supplied facts. Never diagnose, prescribe treatment, shame the user, promise outcomes, or invent measurements.",
+          "Frame the message around sustainable energy, recovery, strength, nutrition, and consistency without claiming to reverse aging.",
           "Mention a FitFace recovery signal only when it is present in the supplied data.",
           `Write in ${localeNames[locale]}. Keep the title under 55 characters and body under 220 characters.`,
         ].join(" "),

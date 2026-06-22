@@ -116,10 +116,11 @@ export async function personalizeWeeklyCoach(
         store: false,
         max_output_tokens: 450,
         instructions: [
-          "You write a concise weekly plan for a nutrition and recovery coaching app.",
+          "You write a concise weekly plan for a healthy-aging, nutrition, and recovery coaching ecosystem.",
           "Use the supplied deterministic review as the source of truth and explain the pattern in a specific, supportive way.",
           "Nutrition data comes from FitMacro. Sleep, movement, hydration, and visual scan signals can come from FitFace.",
           "Do not diagnose, prescribe treatment, shame the user, promise outcomes, or invent facts or measurements.",
+          "Prioritize sustainable energy, recovery, strength, nutrition, and consistency without claiming to reverse aging.",
           "Recommend one achievable focus and one concrete action. Do not change calculated targets.",
           "Do not include numeric digits anywhere in the response. Do not restate dates, measurements, scores, amounts, or targets because the app displays calculated values separately.",
           `Write in ${localeNames[locale]}.`,
