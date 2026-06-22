@@ -34,7 +34,24 @@ export function startCoachPushScheduler(app: FastifyInstance) {
           "AI coach push scheduler request failed"
         );
       } else {
-        app.log.info("AI coach push scheduler completed");
+        const result = response.json() as {
+          count?: number;
+          results?: Array<{
+            personalizedByAi?: boolean;
+            status?: string;
+          }>;
+        };
+        const results = Array.isArray(result.results) ? result.results : [];
+        app.log.info(
+          {
+            aiPersonalized: results.filter((item) => item.personalizedByAi === true).length,
+            failed: results.filter((item) => item.status === "failed").length,
+            sent: results.filter((item) => item.status === "sent").length,
+            skipped: results.filter((item) => item.status === "skipped").length,
+            total: result.count ?? results.length,
+          },
+          "AI coach push scheduler completed"
+        );
       }
     } catch (error) {
       app.log.error(error, "AI coach push scheduler failed");

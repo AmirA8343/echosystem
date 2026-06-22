@@ -87,7 +87,11 @@ export async function registerWeeklyCoachRoutes(app: FastifyInstance) {
     const query = querySchema.parse(request.query ?? {});
     await ensureCoachEventsSchema();
 
-    const [profileResult, summaryResult, eventResult] = await Promise.all([
+    const [userResult, profileResult, summaryResult, eventResult] = await Promise.all([
+      pool.query(
+        `select ecosystem_user_id from ecosystem_users where ecosystem_user_id = $1 limit 1`,
+        [query.ecosystemUserId]
+      ),
       pool.query(`select * from ecosystem_profiles where ecosystem_user_id = $1 limit 1`, [query.ecosystemUserId]),
       pool.query(
         `select * from ecosystem_daily_summaries where ecosystem_user_id = $1 order by date desc limit 14`,
@@ -100,6 +104,9 @@ export async function registerWeeklyCoachRoutes(app: FastifyInstance) {
         [query.ecosystemUserId]
       ),
     ]);
+    if (!userResult.rows[0]) {
+      return reply.code(404).send({ error: "User not found." });
+    }
 
     const profile = profileResult.rows[0]
       ? mapProfile(profileResult.rows[0] as Record<string, unknown>)
@@ -114,8 +121,18 @@ export async function registerWeeklyCoachRoutes(app: FastifyInstance) {
       .digest("hex");
     const locale = query.locale ?? "en";
     const cacheKey = `${query.ecosystemUserId}:${locale}`;
+    const userRef = query.ecosystemUserId.slice(-8);
     const cached = cache.get(cacheKey);
     if (cached && cached.contextHash === contextHash && cached.expiresAt > Date.now()) {
+      app.log.info(
+        {
+          locale,
+          model: cached.coach.model,
+          personalizedByAi: cached.coach.personalizedByAi,
+          userRef,
+        },
+        "Weekly coach cache hit"
+      );
       return { weeklyCoach: cached.coach, weeklyReview, cached: true };
     }
 
@@ -125,6 +142,16 @@ export async function registerWeeklyCoachRoutes(app: FastifyInstance) {
       summaries: summaries as unknown as Record<string, unknown>[],
       weeklyReview,
     });
+
+    app.log.info(
+      {
+        locale,
+        model: weeklyCoach.model,
+        personalizedByAi: weeklyCoach.personalizedByAi,
+        userRef,
+      },
+      "Weekly coach prepared"
+    );
 
     if (cache.size >= 500) cache.clear();
     cache.set(cacheKey, {

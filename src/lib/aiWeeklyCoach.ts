@@ -88,9 +88,12 @@ export async function personalizeWeeklyCoach(
 ): Promise<AiWeeklyCoach> {
   const fallback = fallbackCoach(input.weeklyReview);
   const apiKey = process.env.OPENAI_API_KEY?.trim();
-  if (!apiKey) return fallback;
+  if (!apiKey) {
+    console.warn("[AI weekly coach] using deterministic fallback: OPENAI_API_KEY is missing");
+    return fallback;
+  }
 
-  const model = process.env.OPENAI_COACH_MODEL?.trim() || "gpt-5.4-nano";
+  const model = process.env.OPENAI_COACH_MODEL?.trim() || "gpt-4o-mini";
   const locale = normalizeLocale(input.locale);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
@@ -111,7 +114,6 @@ export async function personalizeWeeklyCoach(
       body: JSON.stringify({
         model,
         store: false,
-        reasoning: { effort: "low" },
         max_output_tokens: 450,
         instructions: [
           "You write a concise weekly plan for a nutrition and recovery coaching app.",
@@ -143,26 +145,51 @@ export async function personalizeWeeklyCoach(
       }),
     });
 
-    if (!response.ok) return { ...fallback, model };
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => "");
+      console.warn(
+        `[AI weekly coach] OpenAI request failed (${response.status}): ${errorBody.slice(0, 500)}`
+      );
+      return { ...fallback, model };
+    }
     const payload = (await response.json()) as Record<string, unknown>;
     const outputText = extractOutputText(payload);
-    if (!outputText) return { ...fallback, model };
+    if (!outputText) {
+      console.warn("[AI weekly coach] using deterministic fallback: model returned no text", {
+        model,
+      });
+      return { ...fallback, model };
+    }
 
     const parsed = weeklyCoachSchema.safeParse(JSON.parse(outputText));
-    if (!parsed.success) return { ...fallback, model };
+    if (!parsed.success) {
+      console.warn("[AI weekly coach] using deterministic fallback: invalid model output", {
+        model,
+      });
+      return { ...fallback, model };
+    }
 
     const allowedNumbers = extractNumbers(source);
     const generatedNumbers = extractNumbers(Object.values(parsed.data).join(" "));
     if ([...generatedNumbers].some((number) => !allowedNumbers.has(number))) {
+      console.warn("[AI weekly coach] using deterministic fallback: model changed a number", {
+        model,
+      });
       return { ...fallback, model };
     }
 
+    console.info("[AI weekly coach] personalization succeeded", {
+      locale,
+      model,
+      momentum: input.weeklyReview.weeklyMomentum,
+    });
     return {
       ...parsed.data,
       personalizedByAi: true,
       model,
     };
-  } catch {
+  } catch (error) {
+    console.warn("[AI weekly coach] personalization failed", error);
     return { ...fallback, model };
   } finally {
     clearTimeout(timeout);

@@ -77,10 +77,11 @@ export async function personalizeCoachNudge(
 ): Promise<PersonalizedCoachNudge> {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   if (!apiKey) {
+    console.warn("[AI coach nudge] using deterministic fallback: OPENAI_API_KEY is missing");
     return { nudge: input.fallback, personalizedByAi: false, model: null };
   }
 
-  const model = process.env.OPENAI_COACH_MODEL?.trim() || "gpt-5.4-nano";
+  const model = process.env.OPENAI_COACH_MODEL?.trim() || "gpt-4o-mini";
   const locale = normalizeLocale(input.locale);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8_000);
@@ -96,7 +97,6 @@ export async function personalizeCoachNudge(
       body: JSON.stringify({
         model,
         store: false,
-        reasoning: { effort: "low" },
         max_output_tokens: 220,
         instructions: [
           "You write one concise mobile push notification for a nutrition and recovery coach.",
@@ -136,23 +136,42 @@ export async function personalizeCoachNudge(
     });
 
     if (!response.ok) {
+      const errorBody = await response.text().catch(() => "");
+      console.warn(
+        `[AI coach nudge] OpenAI request failed (${response.status}): ${errorBody.slice(0, 500)}`
+      );
       return { nudge: input.fallback, personalizedByAi: false, model };
     }
 
     const payload = (await response.json()) as Record<string, unknown>;
     const outputText = extractOutputText(payload);
     if (!outputText) {
+      console.warn("[AI coach nudge] using deterministic fallback: model returned no text", {
+        model,
+      });
       return { nudge: input.fallback, personalizedByAi: false, model };
     }
 
     const parsed = aiCoachTextSchema.safeParse(JSON.parse(outputText));
-    if (
-      !parsed.success ||
-      !preservesKnownNumbers(input.fallback, parsed.data.title, parsed.data.body)
-    ) {
+    if (!parsed.success) {
+      console.warn("[AI coach nudge] using deterministic fallback: invalid model output", {
+        model,
+      });
+      return { nudge: input.fallback, personalizedByAi: false, model };
+    }
+    if (!preservesKnownNumbers(input.fallback, parsed.data.title, parsed.data.body)) {
+      console.warn("[AI coach nudge] using deterministic fallback: model changed a number", {
+        model,
+      });
       return { nudge: input.fallback, personalizedByAi: false, model };
     }
 
+    console.info("[AI coach nudge] personalization succeeded", {
+      locale,
+      model,
+      nudgeType: input.fallback.type,
+      sourceApp: input.sourceApp,
+    });
     return {
       nudge: {
         ...input.fallback,
@@ -162,7 +181,8 @@ export async function personalizeCoachNudge(
       personalizedByAi: true,
       model,
     };
-  } catch {
+  } catch (error) {
+    console.warn("[AI coach nudge] personalization failed", error);
     return { nudge: input.fallback, personalizedByAi: false, model };
   } finally {
     clearTimeout(timeout);

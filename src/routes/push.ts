@@ -529,6 +529,19 @@ export async function registerPushRoutes(app: FastifyInstance) {
         recentSummaries: data.summaries,
       });
       const nudge = personalized.nudge;
+      const userRef = token.ecosystem_user_id.slice(-8);
+
+      app.log.info(
+        {
+          dryRun: body.dryRun,
+          model: personalized.model,
+          nudgeType: nudge.type,
+          personalizedByAi: personalized.personalizedByAi,
+          sourceApp: token.source_app,
+          userRef,
+        },
+        "Coach nudge prepared"
+      );
 
       if (body.dryRun) {
         results.push({
@@ -549,6 +562,15 @@ export async function registerPushRoutes(app: FastifyInstance) {
         sourceApp: token.source_app,
       });
       const status = expoResponse.ok ? "sent" : "failed";
+      app.log.info(
+        {
+          personalizedByAi: personalized.personalizedByAi,
+          sourceApp: token.source_app,
+          status,
+          userRef,
+        },
+        "Coach push dispatch completed"
+      );
       await recordPushSend({
         ecosystemUserId: token.ecosystem_user_id,
         sourceApp: token.source_app,
