@@ -32,6 +32,7 @@ export type AiWeeklyCoach = {
   action: string;
   personalizedByAi: boolean;
   model: string | null;
+  fallbackReason: string | null;
 };
 
 type PersonalizeWeeklyCoachInput = {
@@ -67,6 +68,7 @@ const fallbackCoach = (
   action: review.targetAdjustment.reason,
   personalizedByAi: false,
   model: null,
+  fallbackReason: "not_attempted",
 });
 
 const extractOutputText = (response: Record<string, unknown>): string | null => {
@@ -97,7 +99,7 @@ export async function personalizeWeeklyCoach(
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   if (!apiKey) {
     console.warn("[AI weekly coach] using deterministic fallback: OPENAI_API_KEY is missing");
-    return fallback;
+    return { ...fallback, fallbackReason: "missing_api_key" };
   }
 
   const model = process.env.OPENAI_COACH_MODEL?.trim() || "gpt-4o-mini";
@@ -165,7 +167,7 @@ export async function personalizeWeeklyCoach(
       console.warn(
         `[AI weekly coach] OpenAI request failed (${response.status}): ${errorBody.slice(0, 500)}`
       );
-      return { ...fallback, model };
+      return { ...fallback, model, fallbackReason: `provider_${response.status}` };
     }
     const payload = (await response.json()) as Record<string, unknown>;
     const outputText = extractOutputText(payload);
@@ -173,7 +175,7 @@ export async function personalizeWeeklyCoach(
       console.warn("[AI weekly coach] using deterministic fallback: model returned no text", {
         model,
       });
-      return { ...fallback, model };
+      return { ...fallback, model, fallbackReason: "empty_response" };
     }
 
     const parsed = weeklyCoachSchema.safeParse(JSON.parse(outputText));
@@ -181,7 +183,7 @@ export async function personalizeWeeklyCoach(
       console.warn("[AI weekly coach] using deterministic fallback: invalid model output", {
         model,
       });
-      return { ...fallback, model };
+      return { ...fallback, model, fallbackReason: "invalid_output" };
     }
 
     const allowedNumbers = extractNumbers(source);
@@ -190,7 +192,7 @@ export async function personalizeWeeklyCoach(
       console.warn("[AI weekly coach] using deterministic fallback: model changed a number", {
         model,
       });
-      return { ...fallback, model };
+      return { ...fallback, model, fallbackReason: "number_mismatch" };
     }
 
     console.info("[AI weekly coach] personalization succeeded", {
@@ -202,10 +204,17 @@ export async function personalizeWeeklyCoach(
       ...parsed.data,
       personalizedByAi: true,
       model,
+      fallbackReason: null,
     };
   } catch (error) {
     console.warn("[AI weekly coach] personalization failed", error);
-    return { ...fallback, model };
+    const fallbackReason =
+      error instanceof Error && error.name === "AbortError"
+        ? "timeout"
+        : error instanceof SyntaxError
+          ? "invalid_json"
+          : "request_error";
+    return { ...fallback, model, fallbackReason };
   } finally {
     clearTimeout(timeout);
   }

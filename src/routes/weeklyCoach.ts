@@ -136,6 +136,7 @@ export async function registerWeeklyCoachRoutes(app: FastifyInstance) {
       app.log.info(
         {
           locale,
+          fallbackReason: cached.coach.fallbackReason,
           model: cached.coach.model,
           micronutrientCoachingApplied: micronutrientSuggestion !== null,
           personalizedByAi: cached.coach.personalizedByAi,
@@ -162,20 +163,27 @@ export async function registerWeeklyCoachRoutes(app: FastifyInstance) {
     app.log.info(
       {
         locale,
+        fallbackReason: weeklyCoach.fallbackReason,
         model: weeklyCoach.model,
         micronutrientCoachingApplied: micronutrientSuggestion !== null,
         personalizedByAi: weeklyCoach.personalizedByAi,
         userRef,
       },
-      "Weekly coach prepared"
+      `Weekly coach prepared: ai=${weeklyCoach.personalizedByAi ? "true" : "false"}, fallback=${
+        weeklyCoach.fallbackReason ?? "none"
+      }`
     );
 
-    if (cache.size >= 500) cache.clear();
-    cache.set(cacheKey, {
-      contextHash,
-      expiresAt: Date.now() + CACHE_TTL_MS,
-      coach: weeklyCoach,
-    });
+    if (weeklyCoach.personalizedByAi) {
+      if (cache.size >= 500) cache.clear();
+      cache.set(cacheKey, {
+        contextHash,
+        expiresAt: Date.now() + CACHE_TTL_MS,
+        coach: weeklyCoach,
+      });
+    } else {
+      cache.delete(cacheKey);
+    }
 
     return {
       weeklyCoach,
