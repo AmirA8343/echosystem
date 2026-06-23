@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { pool } from "../db/pool.js";
 import { sanitizeDailySummaryPatch } from "../lib/mergeDailySummary.js";
+import { isMicronutrientCoachingEnabledForUser } from "../lib/micronutrientCoach.js";
 
 const micronutrientsSchema = z.object({
   fiberG: z.number().nonnegative().optional(),
@@ -193,7 +194,7 @@ export async function registerDailySummaryRoutes(app: FastifyInstance) {
         (value) => Number(value) > 0
       ).length;
       const recommendationsEnabled =
-        process.env.MICRONUTRIENT_COACHING_ENABLED === "true";
+        isMicronutrientCoachingEnabledForUser(body.ecosystemUserId);
       app.log.info(
         {
           date: body.date,

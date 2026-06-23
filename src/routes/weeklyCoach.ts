@@ -121,6 +121,7 @@ export async function registerWeeklyCoachRoutes(app: FastifyInstance) {
     const weeklyReview = deriveWeeklyReview(profile, summaries, events);
     if (!weeklyReview) return reply.code(404).send({ error: "Weekly coach data is unavailable." });
     const micronutrientSuggestion = deriveMicronutrientCoachSuggestion({
+      ecosystemUserId: query.ecosystemUserId,
       profile: profile as unknown as Record<string, unknown> | null,
       summaries: summaries as unknown as Record<string, unknown>[],
     });
@@ -171,7 +172,7 @@ export async function registerWeeklyCoachRoutes(app: FastifyInstance) {
       },
       `Weekly coach prepared: ai=${weeklyCoach.personalizedByAi ? "true" : "false"}, fallback=${
         weeklyCoach.fallbackReason ?? "none"
-      }`
+      }, micronutrients=${micronutrientSuggestion ? "true" : "false"}`
     );
 
     if (weeklyCoach.personalizedByAi) {

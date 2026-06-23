@@ -132,11 +132,29 @@ const readMicronutrients = (
 export const isMicronutrientCoachingEnabled = (): boolean =>
   process.env.MICRONUTRIENT_COACHING_ENABLED === "true";
 
+const getMicronutrientTestUserIds = (): Set<string> =>
+  new Set(
+    String(process.env.MICRONUTRIENT_COACHING_TEST_USER_IDS ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean)
+  );
+
+export const getMicronutrientTestUserCount = (): number =>
+  getMicronutrientTestUserIds().size;
+
+export const isMicronutrientCoachingEnabledForUser = (
+  ecosystemUserId?: string | null
+): boolean =>
+  isMicronutrientCoachingEnabled() ||
+  Boolean(ecosystemUserId && getMicronutrientTestUserIds().has(ecosystemUserId));
+
 export function deriveMicronutrientCoachSuggestion(input: {
+  ecosystemUserId?: string | null;
   summaries: Record<string, unknown>[];
   profile: Record<string, unknown> | null;
 }): MicronutrientCoachSuggestion | null {
-  if (!isMicronutrientCoachingEnabled()) return null;
+  if (!isMicronutrientCoachingEnabledForUser(input.ecosystemUserId)) return null;
 
   const eligibleDays = input.summaries.slice(0, 7).filter((summary) => {
     const meals = summaryNumber(summary, "mealsLogged", "meals_logged");

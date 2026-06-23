@@ -88,6 +88,7 @@ function numberOrZero(value: unknown): number {
 }
 
 function buildCoachNudgeCandidates(input: {
+  ecosystemUserId: string;
   sourceApp: "fitmacro" | "fitface";
   profile: Record<string, unknown> | null;
   today: Record<string, unknown> | null;
@@ -180,6 +181,7 @@ function buildCoachNudgeCandidates(input: {
 
   if (input.sourceApp === "fitmacro") {
     const micronutrientSuggestion = deriveMicronutrientCoachSuggestion({
+      ecosystemUserId: input.ecosystemUserId,
       profile: input.profile,
       summaries: input.recentSummaries,
     });
@@ -515,6 +517,7 @@ export async function registerPushRoutes(app: FastifyInstance) {
       }
 
       const nudgeCandidates = buildCoachNudgeCandidates({
+        ecosystemUserId: token.ecosystem_user_id,
         sourceApp: token.source_app,
         profile: data.profile,
         today: data.today,
