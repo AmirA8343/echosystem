@@ -15,9 +15,12 @@ import { registerWeeklyCoachRoutes } from "./routes/weeklyCoach.js";
 
 const app = Fastify({ logger: true });
 
+const micronutrientCoachingEnabled = isMicronutrientCoachingEnabled();
 app.log.info(
-  { enabled: isMicronutrientCoachingEnabled() },
-  "Micronutrient coaching feature flag loaded"
+  { enabled: micronutrientCoachingEnabled },
+  `Micronutrient coaching feature flag loaded: ${
+    micronutrientCoachingEnabled ? "enabled" : "disabled"
+  }`
 );
 
 app.setErrorHandler((error, _request, reply) => {

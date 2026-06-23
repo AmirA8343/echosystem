@@ -189,17 +189,21 @@ export async function registerDailySummaryRoutes(app: FastifyInstance) {
 
     const row = result.rows[0] as Record<string, unknown>;
     if (patch.micronutrients) {
+      const nutrientCount = Object.values(patch.micronutrients).filter(
+        (value) => Number(value) > 0
+      ).length;
+      const recommendationsEnabled =
+        process.env.MICRONUTRIENT_COACHING_ENABLED === "true";
       app.log.info(
         {
           date: body.date,
-          nutrientCount: Object.values(patch.micronutrients).filter(
-            (value) => Number(value) > 0
-          ).length,
-          recommendationsEnabled:
-            process.env.MICRONUTRIENT_COACHING_ENABLED === "true",
+          nutrientCount,
+          recommendationsEnabled,
           userRef: body.ecosystemUserId.slice(-8),
         },
-        "Micronutrient daily summary stored"
+        `Micronutrient daily summary stored: nutrients=${nutrientCount}, recommendations=${
+          recommendationsEnabled ? "enabled" : "disabled"
+        }`
       );
     }
     return {
