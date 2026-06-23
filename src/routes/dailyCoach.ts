@@ -5,6 +5,7 @@ import { pool } from "../db/pool.js";
 import { personalizeCoachNudge, type PersonalizedCoachNudge } from "../lib/aiCoachNudge.js";
 import { buildDailyMorningReview } from "../lib/dailyMorningCoach.js";
 import { getLocalDateKey } from "../lib/date.js";
+import { deriveMicronutrientCoachSuggestion } from "../lib/micronutrientCoach.js";
 
 const querySchema = z.object({
   ecosystemUserId: z.string().uuid(),
@@ -73,6 +74,11 @@ export async function registerDailyCoachRoutes(app: FastifyInstance) {
     const yesterday =
       (yesterdayResult.rows[0] as Record<string, unknown> | undefined) ?? null;
     const recentSummaries = recentResult.rows as Record<string, unknown>[];
+    const micronutrientSuggestion = deriveMicronutrientCoachSuggestion({
+      ecosystemUserId: query.ecosystemUserId,
+      profile,
+      summaries: recentSummaries,
+    });
     const fallback = buildDailyMorningReview({
       sourceApp: query.sourceApp,
       profile,
@@ -81,7 +87,16 @@ export async function registerDailyCoachRoutes(app: FastifyInstance) {
     });
     const locale = query.locale ?? "en";
     const contextHash = createHash("sha256")
-      .update(JSON.stringify({ profile, today, yesterday, fallback, locale }))
+      .update(
+        JSON.stringify({
+          profile,
+          today,
+          yesterday,
+          fallback,
+          locale,
+          micronutrientSuggestion,
+        })
+      )
       .digest("hex");
     const cacheKey = `${query.ecosystemUserId}:${query.sourceApp}:${locale}`;
     const cached = cache.get(cacheKey);
@@ -120,6 +135,7 @@ export async function registerDailyCoachRoutes(app: FastifyInstance) {
     app.log.info(
       {
         cached: cacheHit,
+        micronutrientCoachingApplied: micronutrientSuggestion !== null,
         personalizedByAi: personalized.personalizedByAi,
         sourceApp: query.sourceApp,
         usedYesterdayData: yesterday !== null,
@@ -148,6 +164,7 @@ export async function registerDailyCoachRoutes(app: FastifyInstance) {
           recommendedApp: query.sourceApp,
           destinationKey: query.sourceApp === "fitmacro" ? "meal_plan" : "daily_tracking",
         },
+        micronutrientSuggestion,
       },
       cached: cacheHit,
     };
