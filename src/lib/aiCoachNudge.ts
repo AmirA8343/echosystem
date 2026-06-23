@@ -29,6 +29,7 @@ type PersonalizeCoachNudgeInput = {
   locale?: string | null;
   profile: Record<string, unknown> | null;
   today: Record<string, unknown> | null;
+  yesterday: Record<string, unknown> | null;
   recentSummaries: Array<Record<string, unknown>>;
 };
 
@@ -104,6 +105,7 @@ export async function personalizeCoachNudge(
           "Use only supplied facts. Never diagnose, prescribe treatment, shame the user, promise outcomes, or invent measurements.",
           "Frame the message around sustainable energy, recovery, strength, nutrition, and consistency without claiming to reverse aging.",
           "Mention a FitFace recovery signal only when it is present in the supplied data.",
+          "For a daily morning review, clearly connect yesterday's supplied facts to one practical action for today.",
           `Write in ${localeNames[locale]}. Keep the title under 55 characters and body under 220 characters.`,
         ].join(" "),
         input: JSON.stringify({
@@ -115,6 +117,11 @@ export async function personalizeCoachNudge(
           },
           profile: input.profile,
           today: input.today,
+          yesterday: input.yesterday
+            ? Object.fromEntries(
+                Object.entries(input.yesterday).filter(([key]) => key !== "micronutrients")
+              )
+            : null,
           recentSummaries: input.recentSummaries.slice(0, 7).map((summary) =>
             Object.fromEntries(
               Object.entries(summary).filter(([key]) => key !== "micronutrients")

@@ -4,6 +4,7 @@ import { pool } from "../db/pool.js";
 import { personalizeCoachNudge } from "../lib/aiCoachNudge.js";
 import { getLocalDateKey } from "../lib/date.js";
 import { getCoachMealSuggestion } from "../lib/coachMealSuggestions.js";
+import { buildDailyMorningReview } from "../lib/dailyMorningCoach.js";
 import { deriveMicronutrientCoachSuggestion } from "../lib/micronutrientCoach.js";
 import type { CoachPushNudge } from "../types.js";
 
@@ -92,7 +93,9 @@ function buildCoachNudgeCandidates(input: {
   sourceApp: "fitmacro" | "fitface";
   profile: Record<string, unknown> | null;
   today: Record<string, unknown> | null;
+  yesterday: Record<string, unknown> | null;
   recentSummaries: Record<string, unknown>[];
+  includeMorningReview: boolean;
 }): CoachPushNudge[] {
   const proteinTarget = numberOrZero(input.profile?.protein_target);
   const proteinLogged = numberOrZero(input.today?.protein_logged);
@@ -107,6 +110,17 @@ function buildCoachNudgeCandidates(input: {
   const faceScanDone = input.today?.face_scan_done === true;
   const bodyScanDone = input.today?.body_scan_done === true;
   const candidates: CoachPushNudge[] = [];
+
+  if (input.includeMorningReview) {
+    candidates.push(
+      buildDailyMorningReview({
+        sourceApp: input.sourceApp,
+        profile: input.profile,
+        today: input.today,
+        yesterday: input.yesterday,
+      })
+    );
+  }
 
   if (proteinGap >= 30) {
     const meal = getCoachMealSuggestion(proteinGap, Math.min(proteinGap, 40));
@@ -216,13 +230,21 @@ async function getProfileAndToday(ecosystemUserId: string) {
   if (!user) return null;
 
   const profile = (profileResult.rows[0] as Record<string, unknown> | undefined) ?? null;
-  const todayDate = getLocalDateKey(String(profile?.timezone ?? "America/Toronto"));
-  const [todayResult, summaryResult] = await Promise.all([
+  const timezone = String(profile?.timezone ?? "America/Toronto");
+  const todayDate = getLocalDateKey(timezone);
+  const yesterdayDate = getLocalDateKey(timezone, new Date(Date.now() - 24 * 60 * 60 * 1000));
+  const [todayResult, yesterdayResult, summaryResult] = await Promise.all([
     pool.query(
       `select * from ecosystem_daily_summaries
        where ecosystem_user_id = $1 and date = $2::date
        limit 1`,
       [ecosystemUserId, todayDate]
+    ),
+    pool.query(
+      `select * from ecosystem_daily_summaries
+       where ecosystem_user_id = $1 and date = $2::date
+       limit 1`,
+      [ecosystemUserId, yesterdayDate]
     ),
     pool.query(
       `select * from ecosystem_daily_summaries
@@ -238,6 +260,7 @@ async function getProfileAndToday(ecosystemUserId: string) {
     user,
     profile,
     today: (todayResult.rows[0] as Record<string, unknown> | undefined) ?? null,
+    yesterday: (yesterdayResult.rows[0] as Record<string, unknown> | undefined) ?? null,
     summaries,
   };
 }
@@ -284,6 +307,8 @@ async function recentlySent(input: {
 }): Promise<boolean> {
   const dedupeWindow = input.nudgeType.startsWith("micronutrient_")
     ? "7 days"
+    : input.nudgeType === "daily_morning_review"
+      ? "20 hours"
     : "4 hours";
   const result = await pool.query(
     `select 1 from ecosystem_push_sends
@@ -521,7 +546,9 @@ export async function registerPushRoutes(app: FastifyInstance) {
         sourceApp: token.source_app,
         profile: data.profile,
         today: data.today,
+        yesterday: data.yesterday,
         recentSummaries: data.summaries,
+        includeMorningReview: body.force || getLocalHour(timezone) === 8,
       });
       let fallbackNudge: CoachPushNudge | undefined = body.force
         ? nudgeCandidates[0]
@@ -566,6 +593,7 @@ export async function registerPushRoutes(app: FastifyInstance) {
         locale: token.preferred_locale,
         profile: data.profile,
         today: data.today,
+        yesterday: data.yesterday,
         recentSummaries: data.summaries,
       });
       const nudge = personalized.nudge;
@@ -578,6 +606,8 @@ export async function registerPushRoutes(app: FastifyInstance) {
           nudgeType: nudge.type,
           personalizedByAi: personalized.personalizedByAi,
           sourceApp: token.source_app,
+          usedYesterdayData:
+            nudge.type === "daily_morning_review" && data.yesterday !== null,
           userRef,
         },
         "Coach nudge prepared"
