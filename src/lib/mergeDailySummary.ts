@@ -26,6 +26,8 @@ const FITMACRO_FIELDS = [
   "proteinLogged",
   "mealsLogged",
   "activeEnergyKcal",
+  "workoutMinutes",
+  "steps",
   "sodiumMg",
   "micronutrients",
 ] as const;
