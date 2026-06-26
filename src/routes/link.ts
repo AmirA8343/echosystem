@@ -11,11 +11,23 @@ const linkBodySchema = z.object({
 export async function registerLinkRoutes(app: FastifyInstance) {
   app.post("/v1/ecosystem/link", async (request, reply) => {
     const body = linkBodySchema.parse(request.body ?? {});
-    if (!body.fitmacroUid && !body.fitfaceUid && !body.email) {
+    const auth = request.ecosystemAuth;
+    if (!auth && !body.fitmacroUid && !body.fitfaceUid && !body.email) {
       return reply.code(400).send({ error: "At least one identifier is required." });
     }
+    if (auth) {
+      const expectedUid = auth.sourceApp === "fitmacro" ? body.fitmacroUid : body.fitfaceUid;
+      const unexpectedUid = auth.sourceApp === "fitmacro" ? body.fitfaceUid : body.fitmacroUid;
+      if (unexpectedUid || expectedUid !== auth.uid) {
+        return reply.code(403).send({ error: "Authenticated user does not match link request." });
+      }
+    }
 
-    const normalizedEmail = body.email?.toLowerCase() ?? null;
+    const normalizedEmail = auth
+      ? auth.emailVerified
+        ? auth.email
+        : null
+      : body.email?.toLowerCase() ?? null;
     const lockKeys = [normalizedEmail, body.fitmacroUid ?? null, body.fitfaceUid ?? null]
       .filter((value): value is string => Boolean(value))
       .map((value) => `ecosystem-link:${value}`)

@@ -2,6 +2,7 @@ import "dotenv/config";
 import Fastify from "fastify";
 import { ZodError } from "zod";
 import { startCoachPushScheduler } from "./jobs/coachPushScheduler.js";
+import { registerEcosystemAuth } from "./lib/auth.js";
 import {
   getMicronutrientTestUserCount,
   isMicronutrientCoachingEnabled,
@@ -16,6 +17,7 @@ import { registerProfileRoutes } from "./routes/profile.js";
 import { registerPushRoutes } from "./routes/push.js";
 import { registerUserRoutes } from "./routes/user.js";
 import { registerWeeklyCoachRoutes } from "./routes/weeklyCoach.js";
+import { registerAccountRoutes } from "./routes/account.js";
 
 const app = Fastify({ logger: true });
 
@@ -47,7 +49,9 @@ app.setErrorHandler((error, _request, reply) => {
 
 app.get("/health", async () => ({ ok: true }));
 
+await registerEcosystemAuth(app);
 await registerLinkRoutes(app);
+await registerAccountRoutes(app);
 await registerUserRoutes(app);
 await registerProfileRoutes(app);
 await registerDailySummaryRoutes(app);

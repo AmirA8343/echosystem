@@ -10,8 +10,16 @@ const querySchema = z.object({
 export async function registerUserRoutes(app: FastifyInstance) {
   app.get("/v1/ecosystem/user", async (request, reply) => {
     const query = querySchema.parse(request.query ?? {});
+    const auth = request.ecosystemAuth;
     if (!query.fitmacroUid && !query.fitfaceUid) {
       return reply.code(400).send({ error: "fitmacroUid or fitfaceUid is required." });
+    }
+    if (auth) {
+      const requestedUid = auth.sourceApp === "fitmacro" ? query.fitmacroUid : query.fitfaceUid;
+      const unexpectedUid = auth.sourceApp === "fitmacro" ? query.fitfaceUid : query.fitmacroUid;
+      if (unexpectedUid || requestedUid !== auth.uid) {
+        return reply.code(403).send({ error: "Ecosystem account access denied." });
+      }
     }
 
     const userResult = await pool.query(

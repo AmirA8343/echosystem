@@ -27,6 +27,33 @@ const positiveNumberOrNull = (value: unknown): number | null => {
   return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
 };
 
+const stringOrNull = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+};
+
+const firstNumberOrNull = (
+  primary: Record<string, unknown> | null,
+  secondary: Record<string, unknown> | null,
+  key: string
+): number | null => positiveNumberOrNull(primary?.[key]) ?? positiveNumberOrNull(secondary?.[key]);
+
+const firstStringOrNull = (
+  primary: Record<string, unknown> | null,
+  secondary: Record<string, unknown> | null,
+  key: string
+): string | null => stringOrNull(primary?.[key]) ?? stringOrNull(secondary?.[key]);
+
+const firstBooleanOrNull = (
+  primary: Record<string, unknown> | null,
+  secondary: Record<string, unknown> | null,
+  key: string
+): boolean | null => {
+  const value = primary?.[key] ?? secondary?.[key];
+  return typeof value === "boolean" ? value : null;
+};
+
 export async function registerDailyCoachRoutes(app: FastifyInstance) {
   app.get("/v1/ecosystem/daily-coach", async (request, reply) => {
     const query = querySchema.parse(request.query ?? {});
@@ -115,6 +142,7 @@ export async function registerDailyCoachRoutes(app: FastifyInstance) {
         today,
         yesterday,
         recentSummaries,
+        micronutrientSuggestion,
       });
       if (personalized.personalizedByAi) {
         if (cache.size >= 500) cache.clear();
@@ -128,13 +156,36 @@ export async function registerDailyCoachRoutes(app: FastifyInstance) {
       }
     }
 
-    const sleepHours =
-      positiveNumberOrNull(today?.sleep_hours) ??
-      positiveNumberOrNull(yesterday?.sleep_hours);
+    const sleepHours = firstNumberOrNull(today, yesterday, "sleep_hours");
+    const caloriesLogged = firstNumberOrNull(today, yesterday, "calories_logged");
+    const proteinLogged = firstNumberOrNull(today, yesterday, "protein_logged");
+    const hydrationMl = firstNumberOrNull(today, yesterday, "hydration_ml");
+    const steps = firstNumberOrNull(today, yesterday, "steps");
+    const workoutMinutes = firstNumberOrNull(today, yesterday, "workout_minutes");
+    const hasFitmacroNutrition =
+      positiveNumberOrNull(yesterday?.calories_logged) !== null ||
+      positiveNumberOrNull(yesterday?.protein_logged) !== null ||
+      positiveNumberOrNull(today?.calories_logged) !== null ||
+      positiveNumberOrNull(today?.protein_logged) !== null;
+    const hasFitfaceSignals =
+      firstBooleanOrNull(yesterday, today, "face_scan_done") === true ||
+      firstBooleanOrNull(yesterday, today, "body_scan_done") === true ||
+      firstNumberOrNull(yesterday, today, "sleep_hours") !== null ||
+      firstNumberOrNull(yesterday, today, "workout_minutes") !== null ||
+      firstNumberOrNull(yesterday, today, "face_overall_score") !== null ||
+      firstNumberOrNull(yesterday, today, "body_definition_score") !== null;
+    const nutritionSignalLabel = firstStringOrNull(
+      yesterday,
+      today,
+      "nutrition_signal_label"
+    );
     const userRef = query.ecosystemUserId.slice(-8);
     app.log.info(
       {
         cached: cacheHit,
+        hasFitfaceSignals,
+        hasFitmacroNutrition,
+        nutritionSignalLabel,
         micronutrientCoachingApplied: micronutrientSuggestion !== null,
         personalizedByAi: personalized.personalizedByAi,
         sourceApp: query.sourceApp,
@@ -154,11 +205,31 @@ export async function registerDailyCoachRoutes(app: FastifyInstance) {
         model: personalized.model,
         signals: {
           sleepHours,
-          caloriesLogged: positiveNumberOrNull(yesterday?.calories_logged),
-          proteinLogged: positiveNumberOrNull(yesterday?.protein_logged),
-          hydrationMl: positiveNumberOrNull(yesterday?.hydration_ml),
-          steps: positiveNumberOrNull(yesterday?.steps),
-          workoutMinutes: positiveNumberOrNull(yesterday?.workout_minutes),
+          caloriesLogged,
+          proteinLogged,
+          hydrationMl,
+          steps,
+          workoutMinutes,
+          faceScanDone: firstBooleanOrNull(yesterday, today, "face_scan_done"),
+          bodyScanDone: firstBooleanOrNull(yesterday, today, "body_scan_done"),
+          faceOverallScore: firstNumberOrNull(yesterday, today, "face_overall_score"),
+          bodyPostureScore: firstNumberOrNull(yesterday, today, "body_posture_score"),
+          bodyDefinitionScore: firstNumberOrNull(
+            yesterday,
+            today,
+            "body_definition_score"
+          ),
+          bodyFatRangeEstimate: firstStringOrNull(
+            yesterday,
+            today,
+            "body_fat_range_estimate"
+          ),
+          nutritionSignalLabel,
+          nutritionSuggestion: firstStringOrNull(
+            yesterday,
+            today,
+            "nutrition_suggestion"
+          ),
         },
         action: {
           recommendedApp: query.sourceApp,

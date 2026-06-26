@@ -51,7 +51,17 @@ export async function ensureDailySummarySchema(): Promise<void> {
     ensureDailySummarySchemaPromise = pool
       .query(
         `alter table ecosystem_daily_summaries
-         add column if not exists micronutrients jsonb`
+         add column if not exists micronutrients jsonb,
+         add column if not exists face_scan_done boolean,
+         add column if not exists body_scan_done boolean,
+         add column if not exists face_overall_score integer,
+         add column if not exists body_posture_score integer,
+         add column if not exists body_definition_score integer,
+         add column if not exists body_fat_range_estimate text,
+         add column if not exists nutrition_signal_label text,
+         add column if not exists nutrition_suggestion text,
+         add column if not exists fitmacro_updated_at timestamptz,
+         add column if not exists fitface_updated_at timestamptz`
       )
       .then(() => undefined);
   }
