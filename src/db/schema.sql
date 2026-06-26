@@ -41,6 +41,7 @@ create table if not exists ecosystem_daily_summaries (
   steps integer,
   sleep_hours numeric(4,2),
   hydration_ml integer,
+  active_energy_kcal integer,
   sodium_mg integer,
   micronutrients jsonb,
   face_scan_done boolean,
@@ -110,6 +111,7 @@ alter table ecosystem_daily_summaries add column if not exists body_fat_range_es
 alter table ecosystem_daily_summaries add column if not exists nutrition_signal_label text;
 alter table ecosystem_daily_summaries add column if not exists nutrition_suggestion text;
 alter table ecosystem_daily_summaries add column if not exists micronutrients jsonb;
+alter table ecosystem_daily_summaries add column if not exists active_energy_kcal integer;
 
 create index if not exists idx_ecosystem_users_email on ecosystem_users(email);
 create index if not exists idx_daily_summaries_date on ecosystem_daily_summaries(date);

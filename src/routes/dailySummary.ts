@@ -31,6 +31,7 @@ const summaryBodySchema = z.object({
     steps: z.number().int().optional(),
     sleepHours: z.number().optional(),
     hydrationMl: z.number().int().optional(),
+    activeEnergyKcal: z.number().int().optional(),
     sodiumMg: z.number().int().optional(),
     micronutrients: micronutrientsSchema.optional(),
     faceScanDone: z.boolean().optional(),
@@ -60,6 +61,7 @@ export async function ensureDailySummarySchema(): Promise<void> {
          add column if not exists body_fat_range_estimate text,
          add column if not exists nutrition_signal_label text,
          add column if not exists nutrition_suggestion text,
+         add column if not exists active_energy_kcal integer,
          add column if not exists fitmacro_updated_at timestamptz,
          add column if not exists fitface_updated_at timestamptz`
       )
@@ -97,6 +99,7 @@ function mapDailySummary(row: Record<string, unknown>) {
     steps: row.steps,
     sleepHours: Number(row.sleep_hours ?? 0) || null,
     hydrationMl: row.hydration_ml,
+    activeEnergyKcal: row.active_energy_kcal,
     sodiumMg: row.sodium_mg,
     micronutrients: row.micronutrients ?? null,
     faceScanDone: row.face_scan_done,
@@ -130,6 +133,7 @@ export async function registerDailySummaryRoutes(app: FastifyInstance) {
       steps: patch.steps ?? current.rows[0]?.steps ?? null,
       sleepHours: patch.sleepHours ?? current.rows[0]?.sleep_hours ?? null,
       hydrationMl: patch.hydrationMl ?? current.rows[0]?.hydration_ml ?? null,
+      activeEnergyKcal: patch.activeEnergyKcal ?? current.rows[0]?.active_energy_kcal ?? null,
       sodiumMg: patch.sodiumMg ?? current.rows[0]?.sodium_mg ?? null,
       micronutrients: patch.micronutrients ?? current.rows[0]?.micronutrients ?? null,
       faceScanDone: patch.faceScanDone ?? current.rows[0]?.face_scan_done ?? null,
@@ -145,14 +149,14 @@ export async function registerDailySummaryRoutes(app: FastifyInstance) {
     const result = await pool.query(
       `insert into ecosystem_daily_summaries (
          ecosystem_user_id, date, calories_logged, protein_logged, meals_logged,
-         workout_minutes, steps, sleep_hours, hydration_ml, sodium_mg, micronutrients, face_scan_done, body_scan_done,
+         workout_minutes, steps, sleep_hours, hydration_ml, active_energy_kcal, sodium_mg, micronutrients, face_scan_done, body_scan_done,
          face_overall_score, body_posture_score, body_definition_score, body_fat_range_estimate,
          nutrition_signal_label, nutrition_suggestion, ${timestampColumn}
        ) values (
          $1, $2, $3, $4, $5,
-         $6, $7, $8, $9, $10, $11, $12, $13,
-         $14, $15, $16, $17,
-         $18, $19, now()
+         $6, $7, $8, $9, $10, $11, $12, $13, $14,
+         $15, $16, $17, $18,
+         $19, $20, now()
        )
        on conflict (ecosystem_user_id, date) do update set
          calories_logged = excluded.calories_logged,
@@ -162,6 +166,7 @@ export async function registerDailySummaryRoutes(app: FastifyInstance) {
          steps = excluded.steps,
          sleep_hours = excluded.sleep_hours,
          hydration_ml = excluded.hydration_ml,
+         active_energy_kcal = excluded.active_energy_kcal,
          sodium_mg = excluded.sodium_mg,
          micronutrients = excluded.micronutrients,
          face_scan_done = excluded.face_scan_done,
@@ -185,6 +190,7 @@ export async function registerDailySummaryRoutes(app: FastifyInstance) {
         merged.steps,
         merged.sleepHours,
         merged.hydrationMl,
+        merged.activeEnergyKcal,
         merged.sodiumMg,
         merged.micronutrients,
         merged.faceScanDone,

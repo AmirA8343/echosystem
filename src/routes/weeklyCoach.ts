@@ -37,6 +37,7 @@ const mapSummary = (row: Record<string, unknown>): EcosystemDailySummary => ({
   steps: row.steps as number | null,
   sleepHours: Number(row.sleep_hours ?? 0) || null,
   hydrationMl: row.hydration_ml as number | null,
+  activeEnergyKcal: row.active_energy_kcal as number | null,
   sodiumMg: row.sodium_mg as number | null,
   micronutrients:
     row.micronutrients && typeof row.micronutrients === "object"

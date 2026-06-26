@@ -8,6 +8,7 @@ export type DailySummaryPatch = {
   steps?: number;
   sleepHours?: number;
   hydrationMl?: number;
+  activeEnergyKcal?: number;
   sodiumMg?: number;
   micronutrients?: MicronutrientTotals;
   faceScanDone?: boolean;
@@ -24,6 +25,7 @@ const FITMACRO_FIELDS = [
   "caloriesLogged",
   "proteinLogged",
   "mealsLogged",
+  "activeEnergyKcal",
   "sodiumMg",
   "micronutrients",
 ] as const;

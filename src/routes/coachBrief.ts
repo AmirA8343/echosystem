@@ -35,6 +35,7 @@ function mapSummaryRow(row: Record<string, unknown>): EcosystemDailySummary {
     steps: row.steps as number | null,
     sleepHours: Number(row.sleep_hours ?? 0) || null,
     hydrationMl: row.hydration_ml as number | null,
+    activeEnergyKcal: row.active_energy_kcal as number | null,
     sodiumMg: row.sodium_mg as number | null,
     faceScanDone: row.face_scan_done as boolean | null,
     bodyScanDone: row.body_scan_done as boolean | null,

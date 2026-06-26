@@ -22,6 +22,19 @@ type CacheEntry = {
 const cache = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 3 * 60 * 60 * 1000;
 
+type DailyRescuePlan = {
+  status: "on_track" | "tight" | "over_target" | "protein_rescue";
+  title: string;
+  message: string;
+  nextMealCalories: number;
+  nextMealProtein: number;
+  movementMinutes: number;
+  remainingCalories: number;
+  remainingProtein: number;
+  activeEnergyKcal: number | null;
+  tomorrowNote: string;
+} | null;
+
 const positiveNumberOrNull = (value: unknown): number | null => {
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
@@ -52,6 +65,86 @@ const firstBooleanOrNull = (
 ): boolean | null => {
   const value = primary?.[key] ?? secondary?.[key];
   return typeof value === "boolean" ? value : null;
+};
+
+const buildDailyRescuePlan = (
+  profile: Record<string, unknown> | null,
+  summary: Record<string, unknown> | null
+): DailyRescuePlan => {
+  if (!summary) return null;
+
+  const calorieTarget = positiveNumberOrNull(profile?.calorie_target);
+  const proteinTarget = positiveNumberOrNull(profile?.protein_target);
+  const caloriesLogged = positiveNumberOrNull(summary.calories_logged) ?? 0;
+  const proteinLogged = positiveNumberOrNull(summary.protein_logged) ?? 0;
+  const activeEnergyKcal = positiveNumberOrNull(summary.active_energy_kcal);
+  if (!calorieTarget && !proteinTarget) return null;
+  if (caloriesLogged <= 0 && proteinLogged <= 0) return null;
+
+  const movementCredit = activeEnergyKcal ? Math.min(activeEnergyKcal, 300) : 0;
+  const effectiveCalorieTarget = (calorieTarget ?? 0) + movementCredit;
+  const remainingCalories =
+    calorieTarget !== null ? Math.round(effectiveCalorieTarget - caloriesLogged) : 0;
+  const remainingProtein =
+    proteinTarget !== null ? Math.round(proteinTarget - proteinLogged) : 0;
+  const proteinRescueNeeded = proteinTarget !== null && remainingProtein >= 25;
+  const isOverTarget = calorieTarget !== null && remainingCalories < -100;
+  const isTight = calorieTarget !== null && remainingCalories >= -100 && remainingCalories < 350;
+
+  if (!isOverTarget && !isTight && !proteinRescueNeeded) return null;
+
+  const nextMealProtein = Math.max(25, Math.min(45, Math.max(remainingProtein, 25)));
+  const nextMealCalories = isOverTarget
+    ? 350
+    : isTight
+      ? Math.max(300, Math.min(450, remainingCalories + 100))
+      : Math.max(350, Math.min(600, Math.round(Math.max(remainingCalories, 450) * 0.45)));
+  const movementMinutes = isOverTarget ? 20 : isTight ? 15 : 10;
+  const tomorrowNote =
+    "Tomorrow returns to the normal target. Do not punish today with a crash diet.";
+
+  if (isOverTarget) {
+    return {
+      status: "over_target",
+      title: "Rescue the day, do not restart it",
+      message: `You are about ${Math.abs(remainingCalories)} kcal over the adjusted target. Keep the next meal calm: lean protein, vegetables or fruit, water, and no extra snacking.`,
+      nextMealCalories,
+      nextMealProtein,
+      movementMinutes,
+      remainingCalories,
+      remainingProtein: Math.max(0, remainingProtein),
+      activeEnergyKcal,
+      tomorrowNote,
+    };
+  }
+
+  if (isTight) {
+    return {
+      status: "tight",
+      title: "Keep the landing clean",
+      message: "Calories are tight, but the day is still controllable. Use one simple protein-forward meal and a short walk instead of skipping food.",
+      nextMealCalories,
+      nextMealProtein,
+      movementMinutes,
+      remainingCalories,
+      remainingProtein: Math.max(0, remainingProtein),
+      activeEnergyKcal,
+      tomorrowNote,
+    };
+  }
+
+  return {
+    status: "protein_rescue",
+    title: "Protein can still save the day",
+    message: `You still need about ${Math.max(0, remainingProtein)}g protein. Make the next meal protein-first, with calories controlled around appetite.`,
+    nextMealCalories,
+    nextMealProtein,
+    movementMinutes,
+    remainingCalories,
+    remainingProtein: Math.max(0, remainingProtein),
+    activeEnergyKcal,
+    tomorrowNote,
+  };
 };
 
 export async function registerDailyCoachRoutes(app: FastifyInstance) {
@@ -160,8 +253,10 @@ export async function registerDailyCoachRoutes(app: FastifyInstance) {
     const caloriesLogged = firstNumberOrNull(today, yesterday, "calories_logged");
     const proteinLogged = firstNumberOrNull(today, yesterday, "protein_logged");
     const hydrationMl = firstNumberOrNull(today, yesterday, "hydration_ml");
+    const activeEnergyKcal = firstNumberOrNull(today, yesterday, "active_energy_kcal");
     const steps = firstNumberOrNull(today, yesterday, "steps");
     const workoutMinutes = firstNumberOrNull(today, yesterday, "workout_minutes");
+    const rescuePlan = buildDailyRescuePlan(profile, today);
     const hasFitmacroNutrition =
       positiveNumberOrNull(yesterday?.calories_logged) !== null ||
       positiveNumberOrNull(yesterday?.protein_logged) !== null ||
@@ -186,6 +281,7 @@ export async function registerDailyCoachRoutes(app: FastifyInstance) {
         hasFitfaceSignals,
         hasFitmacroNutrition,
         nutritionSignalLabel,
+        rescuePlanStatus: rescuePlan?.status ?? null,
         micronutrientCoachingApplied: micronutrientSuggestion !== null,
         personalizedByAi: personalized.personalizedByAi,
         sourceApp: query.sourceApp,
@@ -208,6 +304,7 @@ export async function registerDailyCoachRoutes(app: FastifyInstance) {
           caloriesLogged,
           proteinLogged,
           hydrationMl,
+          activeEnergyKcal,
           steps,
           workoutMinutes,
           faceScanDone: firstBooleanOrNull(yesterday, today, "face_scan_done"),
@@ -235,6 +332,7 @@ export async function registerDailyCoachRoutes(app: FastifyInstance) {
           recommendedApp: query.sourceApp,
           destinationKey: query.sourceApp === "fitmacro" ? "meal_plan" : "daily_tracking",
         },
+        rescuePlan,
         micronutrientSuggestion,
       },
       cached: cacheHit,

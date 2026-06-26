@@ -75,6 +75,7 @@ export type EcosystemDailySummary = {
   steps: number | null;
   sleepHours: number | null;
   hydrationMl: number | null;
+  activeEnergyKcal: number | null;
   sodiumMg: number | null;
   micronutrients?: MicronutrientTotals | null;
   faceScanDone: boolean | null;
