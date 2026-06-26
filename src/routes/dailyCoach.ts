@@ -17,6 +17,7 @@ type CacheEntry = {
   contextHash: string;
   expiresAt: number;
   personalized: PersonalizedCoachNudge;
+  rescuePlan: DailyRescuePlan;
 };
 
 const cache = new Map<string, CacheEntry>();
@@ -26,6 +27,12 @@ type DailyRescuePlan = {
   status: "on_track" | "tight" | "over_target" | "protein_rescue";
   title: string;
   message: string;
+  mealSuggestion?: {
+    title: string;
+    items: string[];
+    note: string;
+    personalizedByAi: boolean;
+  } | null;
   nextMealCalories: number;
   nextMealProtein: number;
   movementMinutes: number;
@@ -34,6 +41,71 @@ type DailyRescuePlan = {
   activeEnergyKcal: number | null;
   tomorrowNote: string;
 } | null;
+
+const rescuePlanAiSchema = z.object({
+  title: z.string().trim().min(4).max(70),
+  message: z.string().trim().min(20).max(260),
+  mealSuggestion: z.object({
+    title: z.string().trim().min(4).max(70),
+    items: z.array(z.string().trim().min(2).max(70)).min(2).max(4),
+    note: z.string().trim().min(10).max(180),
+  }),
+  tomorrowNote: z.string().trim().min(10).max(180),
+});
+
+const localeNames: Record<string, string> = {
+  ar: "Arabic",
+  en: "English",
+  es: "Spanish",
+  fa: "Persian",
+  fr: "French",
+  hi: "Hindi",
+  it: "Italian",
+  ja: "Japanese",
+  ko: "Korean",
+  pt: "Portuguese",
+  "pt-BR": "Brazilian Portuguese",
+  ru: "Russian",
+  tr: "Turkish",
+  zh: "Chinese",
+};
+
+const normalizeLocale = (locale?: string | null): string => {
+  const value = String(locale ?? "en").trim();
+  if (localeNames[value]) return value;
+  const base = value.split("-")[0];
+  return localeNames[base] ? base : "en";
+};
+
+const extractOutputText = (response: Record<string, unknown>): string | null => {
+  const output = Array.isArray(response.output) ? response.output : [];
+  for (const item of output) {
+    if (!item || typeof item !== "object") continue;
+    const content = Array.isArray((item as Record<string, unknown>).content)
+      ? ((item as Record<string, unknown>).content as unknown[])
+      : [];
+    for (const part of content) {
+      if (!part || typeof part !== "object") continue;
+      const value = part as Record<string, unknown>;
+      if (value.type === "output_text" && typeof value.text === "string") {
+        return value.text;
+      }
+    }
+  }
+  return null;
+};
+
+const extractNumbers = (value: string): Set<string> =>
+  new Set(value.match(/\d+(?:[.,]\d+)?/g) ?? []);
+
+const rescuePlanPreservesNumbers = (
+  fallback: NonNullable<DailyRescuePlan>,
+  generated: z.infer<typeof rescuePlanAiSchema>
+): boolean => {
+  const allowed = extractNumbers(JSON.stringify(fallback));
+  const outputNumbers = extractNumbers(JSON.stringify(generated));
+  return [...outputNumbers].every((number) => allowed.has(number));
+};
 
 const positiveNumberOrNull = (value: unknown): number | null => {
   const numeric = Number(value);
@@ -147,6 +219,133 @@ const buildDailyRescuePlan = (
   };
 };
 
+const personalizeDailyRescuePlan = async (input: {
+  rescuePlan: DailyRescuePlan;
+  locale?: string | null;
+  profile: Record<string, unknown> | null;
+  today: Record<string, unknown> | null;
+  yesterday: Record<string, unknown> | null;
+}): Promise<DailyRescuePlan> => {
+  if (!input.rescuePlan) return null;
+
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  if (!apiKey) return input.rescuePlan;
+
+  const model = process.env.OPENAI_COACH_MODEL?.trim() || "gpt-4o-mini";
+  const locale = normalizeLocale(input.locale);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8_000);
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model,
+        store: false,
+        max_output_tokens: 360,
+        instructions: [
+          "You personalize a Day Rescue card for a nutrition and healthy-aging coach.",
+          "The backend already calculated the safe calorie, protein, movement, and remaining-target numbers. Do not change those numbers or create new numeric targets.",
+          "Rewrite the title, message, tomorrowNote, and add one practical mealSuggestion that fits the provided nextMealCalories and nextMealProtein.",
+          "The meal idea must be normal food, not medical advice. Do not shame the user. Do not suggest fasting, crash dieting, detoxes, supplements, medications, or treating disease.",
+          "Use only supplied facts. If active energy or steps are low, make the movement suggestion gentle.",
+          "Avoid adding numbers unless they exactly appear in the supplied rescuePlan.",
+          `Write in ${localeNames[locale]}. Keep it concise for a mobile card.`,
+        ].join(" "),
+        input: JSON.stringify({
+          rescuePlan: input.rescuePlan,
+          profile: input.profile,
+          today: input.today,
+          yesterday: input.yesterday,
+        }),
+        text: {
+          format: {
+            type: "json_schema",
+            name: "daily_rescue_plan",
+            strict: true,
+            schema: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+                message: { type: "string" },
+                mealSuggestion: {
+                  type: "object",
+                  properties: {
+                    title: { type: "string" },
+                    items: {
+                      type: "array",
+                      items: { type: "string" },
+                      minItems: 2,
+                      maxItems: 4,
+                    },
+                    note: { type: "string" },
+                  },
+                  required: ["title", "items", "note"],
+                  additionalProperties: false,
+                },
+                tomorrowNote: { type: "string" },
+              },
+              required: ["title", "message", "mealSuggestion", "tomorrowNote"],
+              additionalProperties: false,
+            },
+          },
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => "");
+      console.warn(
+        `[AI daily rescue] OpenAI request failed (${response.status}): ${errorBody.slice(0, 500)}`
+      );
+      return input.rescuePlan;
+    }
+
+    const payload = (await response.json()) as Record<string, unknown>;
+    const outputText = extractOutputText(payload);
+    if (!outputText) {
+      console.warn("[AI daily rescue] using deterministic rescue: model returned no text", {
+        model,
+      });
+      return input.rescuePlan;
+    }
+
+    const parsed = rescuePlanAiSchema.safeParse(JSON.parse(outputText));
+    if (!parsed.success || !rescuePlanPreservesNumbers(input.rescuePlan, parsed.data)) {
+      console.warn("[AI daily rescue] using deterministic rescue: invalid model output", {
+        model,
+      });
+      return input.rescuePlan;
+    }
+
+    console.info("[AI daily rescue] personalization succeeded", {
+      locale,
+      model,
+      status: input.rescuePlan.status,
+    });
+    return {
+      ...input.rescuePlan,
+      title: parsed.data.title,
+      message: parsed.data.message,
+      mealSuggestion: {
+        ...parsed.data.mealSuggestion,
+        personalizedByAi: true,
+      },
+      tomorrowNote: parsed.data.tomorrowNote,
+    };
+  } catch (error) {
+    console.warn("[AI daily rescue] personalization failed", error);
+    return input.rescuePlan;
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
 export async function registerDailyCoachRoutes(app: FastifyInstance) {
   app.get("/v1/ecosystem/daily-coach", async (request, reply) => {
     const query = querySchema.parse(request.query ?? {});
@@ -205,6 +404,7 @@ export async function registerDailyCoachRoutes(app: FastifyInstance) {
       today,
       yesterday,
     });
+    const baseRescuePlan = buildDailyRescuePlan(profile, today);
     const locale = query.locale ?? "en";
     const contextHash = createHash("sha256")
       .update(
@@ -213,6 +413,7 @@ export async function registerDailyCoachRoutes(app: FastifyInstance) {
           today,
           yesterday,
           fallback,
+          baseRescuePlan,
           locale,
           micronutrientSuggestion,
         })
@@ -221,28 +422,40 @@ export async function registerDailyCoachRoutes(app: FastifyInstance) {
     const cacheKey = `${query.ecosystemUserId}:${query.sourceApp}:${locale}`;
     const cached = cache.get(cacheKey);
     let personalized: PersonalizedCoachNudge;
+    let rescuePlan: DailyRescuePlan;
     let cacheHit = false;
 
     if (cached && cached.contextHash === contextHash && cached.expiresAt > Date.now()) {
       personalized = cached.personalized;
+      rescuePlan = cached.rescuePlan;
       cacheHit = true;
     } else {
-      personalized = await personalizeCoachNudge({
-        fallback,
-        sourceApp: query.sourceApp,
-        locale,
-        profile,
-        today,
-        yesterday,
-        recentSummaries,
-        micronutrientSuggestion,
-      });
+      [personalized, rescuePlan] = await Promise.all([
+        personalizeCoachNudge({
+          fallback,
+          sourceApp: query.sourceApp,
+          locale,
+          profile,
+          today,
+          yesterday,
+          recentSummaries,
+          micronutrientSuggestion,
+        }),
+        personalizeDailyRescuePlan({
+          rescuePlan: baseRescuePlan,
+          locale,
+          profile,
+          today,
+          yesterday,
+        }),
+      ]);
       if (personalized.personalizedByAi) {
         if (cache.size >= 500) cache.clear();
         cache.set(cacheKey, {
           contextHash,
           expiresAt: Date.now() + CACHE_TTL_MS,
           personalized,
+          rescuePlan,
         });
       } else {
         cache.delete(cacheKey);
@@ -256,7 +469,6 @@ export async function registerDailyCoachRoutes(app: FastifyInstance) {
     const activeEnergyKcal = firstNumberOrNull(today, yesterday, "active_energy_kcal");
     const steps = firstNumberOrNull(today, yesterday, "steps");
     const workoutMinutes = firstNumberOrNull(today, yesterday, "workout_minutes");
-    const rescuePlan = buildDailyRescuePlan(profile, today);
     const hasFitmacroNutrition =
       positiveNumberOrNull(yesterday?.calories_logged) !== null ||
       positiveNumberOrNull(yesterday?.protein_logged) !== null ||
@@ -282,6 +494,7 @@ export async function registerDailyCoachRoutes(app: FastifyInstance) {
         hasFitmacroNutrition,
         nutritionSignalLabel,
         rescuePlanStatus: rescuePlan?.status ?? null,
+        rescuePersonalizedByAi: rescuePlan?.mealSuggestion?.personalizedByAi === true,
         micronutrientCoachingApplied: micronutrientSuggestion !== null,
         personalizedByAi: personalized.personalizedByAi,
         sourceApp: query.sourceApp,
